@@ -19,7 +19,7 @@ import errors "github.com/StevenACoffman/toerr/errors"
 - [Design: structure vs. context](#design-structure-vs-context)
 - [Drop-in replacement for the std `errors` package](#drop-in-replacement)
 
-## Message and location
+## Message and Location
 
 [`New`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#New) creates a
 leaf error and records the call site.
@@ -37,7 +37,7 @@ fmt.Println(err) // "dial database: connect"
 Unlike `fmt.Errorf("...: %w", err)`, which only concatenates strings, `New` and
 `Wrap` capture the file, line, and function at the point they are called.
 
-## Structured attributes
+## Structured Attributes
 
 Every constructor takes trailing `slog.Attr` values for context that belongs in
 structured logs rather than in the message:
@@ -62,7 +62,7 @@ message and attributes:
 logger.Error("request failed", slog.Any("err", err))
 ```
 
-## Return trace
+## Return Trace
 
 Each `New` and `Wrap` records a single frame — its own call site. Together they
 form a **return trace**: the path the error took out to the caller, one frame per
@@ -85,7 +85,7 @@ There is no full stack trace and no runtime tail — only the frames you wrapped
 through. (This matches [`braces.dev/errtrace`](https://github.com/bracesdev/errtrace),
 whose return-trace model and tree formatting this package follows.)
 
-### Interoperability with errtrace
+### Interoperability with Errtrace
 
 The trace is built on errtrace's exported marker interface — any error with a
 `TracePC() uintptr` method contributes a frame — and this package's error types
@@ -132,7 +132,7 @@ if _, ok := errors.AsType[*NotFoundError](err); ok {
 }
 ```
 
-## Design: structure vs. context
+## Design: Structure Vs. Context
 
 `New` and `Wrap` take trailing `attrs ...slog.Attr` for open-ended, caller-supplied
 context, but the error's own fields (`msg`, `cause`, `pc`) are typed struct fields,
@@ -156,7 +156,7 @@ different representations:
 In short: open-ended and caller-owned → `[]slog.Attr`; fixed, typed, and
 contract-bearing → named fields.
 
-## Drop-in replacement
+## Drop-in Replacement
 
 - Replace the import `errors` with `github.com/StevenACoffman/toerr/errors`.
 - `Is`, `As`, `Unwrap`, and `Join` are re-exported unchanged.
@@ -166,15 +166,15 @@ contract-bearing → named fields.
 
 ## Packages
 
-| Package    | Purpose                                                                 |
-| ---------- | ----------------------------------------------------------------------- |
+| Package    | Purpose                                                                   |
+| ---------- | ------------------------------------------------------------------------- |
 | `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.             |
-| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Payload`).  |
-| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.        |
-| `errclass` | Coarse severity classification that folds across joined errors.         |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.               |
+| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Payload`).    |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
+| `errclass` | Coarse severity classification that folds across joined errors.           |
 
-## Prior art
+## Prior Art
 
 - [remko/go-errors](https://github.com/remko/go-errors) — the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)
@@ -189,22 +189,21 @@ Go standard library `errors` package.
 
 Unlike the standard library `errors` package, where wrapping errors using Go 1.13's `fmt.Errorf` using `%w` only concatenates strings, in this
 library wrapping errors using `errors.Wrap` will record the file/line/function of the wrap operation. Creating a new error using this library
-using `New` will also record the initial  file/line/function of the error creation.
+using `New` will also record the initial file/line/function of the error creation.
 
 Since errors are often ultimately reported using structured logging, this library seeks to leverage the slog.Attr key-value pair for storing
 custom error contextual information, so that LogAttrs(ctx context.Context, level Level, msg string, attrs ...Attr) can be used for reporting
 the error as it is more efficient. Both `Wrap` and `New` have `attrs ...Attr` as their optional, final trailing argument.
 
 Errors are also used for control flow. An error that was created by this library via `New` or wrapped via `Wrap` can be transparently marked
-using `Mark` such that  errors.AsType will return true for that type. Passing as the first parameter to `Mark` an error that was not created
+using `Mark` such that errors.AsType will return true for that type. Passing as the first parameter to `Mark` an error that was not created
 via this library `New` or `Wrap` will first `Wrap` and then `Mark`.
 
 Please examine these functional requirements against the advice in ~/Documents/agent-orange/go-advice/summary_rules.md and identify what would
 need to be altered in the code to better meet these requirements and adhere to the advice in
 ~/Documents/agent-orange/go-advice/summary_rules.md
 
-
-## StackTraces vs Return Traces
+## StackTraces Vs Return Traces
 
 With stack traces, caller information for the goroutine is captured once when the error is created.
 
@@ -213,20 +212,24 @@ approach works even if the error isn't propagated directly through function retu
 
 Aside from stylistic formatting, in straightforwardly explicit, synchronous Go code where the frames are ordered from origin to deepest, a
 full stack trace like:
-  ```
-  [Pasted text #1 +10 lines]
-  ```
+
+```text
+[Pasted text #1 +10 lines]
+```
+
 Would instead be a return trace of:
-  ```
-  [Pasted text #2 +5 lines]
-  ```
+
+```text
+[Pasted text #2 +5 lines]
+```
+
 These look similar, as the package and function names are duplicative (`braces.dev/errtrace_test.rateLimitDialer`), and the call locations
 have the same files (`/errtrace/example_stack_test.go`) but each call line position (`/errtrace/example_stack_test.go:81`) differs from the
 return line position (`/path/to/errtrace/example_http_test.go:72`).
 
-This can be conceptualized as two sides of a symmetrical arcing parabolic path through the codebase. 
+This can be conceptualized as two sides of a symmetrical arcing parabolic path through the codebase.
 
-```
+```text
   main.coreOuter   :15   ┐
   main.coreMid     :14   │  return trace  (how it escalated out)
   main.coreOrigin  :13   ┤  ← apex: where the error was created
@@ -255,4 +258,3 @@ In the course of troubleshooting an issue where the error is passed outside of f
 ergonomic and helpful display of both sides of this parabolic path in the situations where that is helpful context.
 
 However, when both sides are neatly symmetric, I do not want to add noise.
-

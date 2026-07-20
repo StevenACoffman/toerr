@@ -9,7 +9,7 @@ This guide starts from the standard library and builds up to the techniques this
 repository provides. Each section answers one question: *given this situation,
 which tool do I reach for, and why?*
 
-## The error interface
+## The Error Interface
 
 Every error in Go satisfies one small interface:
 
@@ -24,7 +24,7 @@ type error interface {
 lowercase and has no trailing punctuation, because callers frequently wrap it
 inside a larger sentence.
 
-## Checking an error
+## Checking an Error
 
 The most common pattern is to check for `nil` and stop early:
 
@@ -40,7 +40,7 @@ Handle the error where you check it, or return it to someone who can. The one
 thing never to do is ignore it — a discarded error is a bug that has not
 happened yet.
 
-## A drop-in `errors` package
+## A Drop-in `errors` Package
 
 This repository's root package,
 `github.com/StevenACoffman/toerr/errors`, is a drop-in replacement for the
@@ -59,7 +59,7 @@ import errors "github.com/StevenACoffman/toerr/errors"
 
 The rest of this guide uses that package.
 
-## Sentinel errors: comparing identity with `errors.Is`
+## Sentinel Errors: Comparing Identity with `errors.Is`
 
 A sentinel is a predefined error value that callers can recognize. Define it
 once at package level with the `Err` prefix. Use the `sentinel` package, whose
@@ -97,7 +97,7 @@ two independent `sentinel.New("not found")` values are deliberately *not* equal.
 Reach for a sentinel when callers only need to answer a yes/no question: *is this
 that specific, well-known condition?*
 
-## Custom types and marks: reacting by type with `errors.As` / `AsType`
+## Custom Types and Marks: Reacting by Type with `errors.As` / `AsType`
 
 When callers need structured information — a status code, a field name, a
 retry-after duration — define a type instead of a bare value:
@@ -141,7 +141,7 @@ it first so it still carries a trace:
 ```go
 var ErrRateLimited = &RateLimitError{}
 
-err = errors.Mark(err, ErrRateLimited)         // transparent tag
+err = errors.Mark(err, ErrRateLimited)                // transparent tag
 if _, ok := errors.AsType[*RateLimitError](err); ok { // matches anywhere up the chain
 	backoffAndRetry()
 }
@@ -150,7 +150,7 @@ if _, ok := errors.AsType[*RateLimitError](err); ok { // matches anywhere up the
 Prefer a custom type or a mark when callers must *branch on a category*; prefer a
 sentinel when they match a single well-known value.
 
-## Wrapping for context — and what `%w` leaves out
+## Wrapping for Context — and What `%w` Leaves Out
 
 As an error travels up the call stack, each layer can add context with the `%w`
 verb:
@@ -204,7 +204,7 @@ main.initApp
 	/app/init.go:9
 ```
 
-### Return trace, not stack trace
+### Return Trace, Not Stack Trace
 
 Each `New` and `Wrap` records a single frame — its own call site. Collected along
 the chain and printed origin-first, they form a **return trace**: the path the
@@ -225,7 +225,7 @@ implement it. So the two packages interoperate: an `errtrace.Wrap`-ed error
 nested in one of these chains appears in `%+v`, and these errors appear in
 `errtrace.Format`. You can mix them without losing frames from either.
 
-## Combining independent failures with `errors.Join`
+## Combining Independent Failures with `errors.Join`
 
 `%w` models a **chain**: this failed *because* that failed. Sometimes you instead
 have several **independent** failures that all matter at once — validation of
@@ -264,7 +264,7 @@ Use `%w` for a causal chain and `errors.Join` for a set of siblings. They
 compose: a joined error may contain wrapped errors, and a wrapped error may wrap
 a joined one.
 
-## Domain codes and boundary translation
+## Domain Codes and Boundary Translation
 
 Callers should not have to know that your storage layer happens to use
 `database/sql`, or that a lookup used the filesystem. Errors like `sql.ErrNoRows`
@@ -305,7 +305,7 @@ HTTP, gRPC, or a CLI unchanged — each transport gets its own thin adapter.
 Keeping the transport mapping at the boundary means the same error works
 unchanged whether it surfaces over HTTP, gRPC, or a CLI.
 
-## Attaching context for logs
+## Attaching Context for Logs
 
 When the useful context is structured data rather than prose — a user ID, a
 request ID, a retry count — attach it as `slog` attributes instead of formatting
@@ -340,7 +340,7 @@ lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and
 call site) lives in typed fields. See the README's "structure vs. context"
 section for why.
 
-## Knowing when to give up
+## Knowing When to Give Up
 
 Not every error is worth handling:
 
@@ -356,7 +356,7 @@ Not every error is worth handling:
   high-level handler that logs it (with its trace) and turns it into a response,
   instead of logging-and-continuing at every layer.
 
-## Choosing a pattern
+## Choosing a Pattern
 
 ```mermaid
 graph TD
@@ -374,28 +374,28 @@ graph TD
     I -->|add context, pass up| M[errors.Wrap /<br/>errors.WrapWithMessage]
 ```
 
-## Best practices summary
+## Best Practices Summary
 
-1. Check every returned error. Never discard one with `_` in real code.
-2. Compare with `errors.Is` and extract with `errors.As` / `AsType` — never `==`
-   or a bare type assertion, which miss wrapped errors.
-3. Wrap for context as errors rise, but capture **location**, not just a string
-   prefix — use `errors.Wrap` / `errors.WrapWithMessage`.
-4. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
-   at the implementation boundary; do not let them leak to callers.
-5. Use a sentinel for identity, a custom type / mark / `errcode` for structured
-   data, and `errors.Join` for independent failures collected together.
-6. Keep structured context in `slog.Attr` values on the error; keep the message
-   clean. Log once with `errors.Attrs` + `LogAttrs`.
-7. Map domain codes to a transport (HTTP status) only at the edge, never inside
-   the error type.
-8. `panic` on unrecoverable invariant violations instead of threading checks that
-   cannot improve the outcome; where you can, design the error out of existence.
-9. Return errors rather than logging and continuing — let one high-level handler
-   log the error with its trace and decide the response.
+01. Check every returned error. Never discard one with `_` in real code.
+02. Compare with `errors.Is` and extract with `errors.As` / `AsType` — never `==`
+    or a bare type assertion, which miss wrapped errors.
+03. Wrap for context as errors rise, but capture **location**, not just a string
+    prefix — use `errors.Wrap` / `errors.WrapWithMessage`.
+04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
+    at the implementation boundary; do not let them leak to callers.
+05. Use a sentinel for identity, a custom type / mark / `errcode` for structured
+    data, and `errors.Join` for independent failures collected together.
+06. Keep structured context in `slog.Attr` values on the error; keep the message
+    clean. Log once with `errors.Attrs` + `LogAttrs`.
+07. Map domain codes to a transport (HTTP status) only at the edge, never inside
+    the error type.
+08. `panic` on unrecoverable invariant violations instead of threading checks that
+    cannot improve the outcome; where you can, design the error out of existence.
+09. Return errors rather than logging and continuing — let one high-level handler
+    log the error with its trace and decide the response.
 10. Keep messages lowercase and free of trailing punctuation.
 
-## The packages in this repository
+## The Packages in This Repository
 
 - `errors` (root) — the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
   `AsType`, `Attrs`, and the re-exported `Is`/`As`/`Unwrap`/`Join`. Records call
