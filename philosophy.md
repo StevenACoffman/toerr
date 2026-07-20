@@ -1,9 +1,9 @@
 # How to Handle Errors in Go
 
 Go treats errors as ordinary values: a function that can fail returns an
-`error` as its last result, and the caller checks it. There is no `try`/`catch`
+`error` as its last result, and the caller checks it. Go has no `try`/`catch`
 and no stack unwinding. This looks verbose at first, but it makes the failure
-path explicit and easy to follow.
+path explicit.
 
 This guide starts from the standard library and builds up to the techniques this
 repository provides. Each section answers one question: *given this situation,
@@ -175,7 +175,7 @@ strings. When that message shows up in a log, you get the *what* but not the
 *where* — you are left grepping the source for the literal text `load config`.
 
 This repository closes that gap. `Wrap` records the call site as the error passes
-through; `WrapWithMessage` does the same *and* prepends a message:
+through; `WrapWithMessage` does the same *and* prefixes a message:
 
 ```go
 // Wrap: add location (and optional attrs), no message change.
@@ -214,14 +214,14 @@ This is a different thing from a stack trace. A stack trace is captured once, at
 creation, and answers *how did we get to where the error started?* A return trace
 is built incrementally, one frame per wrap, and answers *how did this escalate on
 its way out?* Because it is assembled as the error propagates rather than
-snapshotted at one instant, it works even when the error is sent over a channel or
-stored and returned from a different goroutine — where a creation-time stack would
-be misleading. There is no full stack and no runtime tail: `%+v` shows only the
+captured in a single snapshot, it works even when the error is sent over a channel
+or stored and returned from a different goroutine — where a creation-time stack
+would be misleading. No full stack and no runtime tail: `%+v` shows only the
 frames you wrapped through. This follows the `braces.dev/errtrace` model.
 
-The trace machinery keys off errtrace's exported marker interface — any error
+The trace machinery keys off `errtrace`'s exported marker interface — any error
 with a `TracePC() uintptr` method contributes a frame — and this package's errors
-implement it. So the two packages interoperate: an `errtrace.Wrap`-ed error
+implement it, so the two packages interoperate: an `errtrace.Wrap`-ed error
 nested in one of these chains appears in `%+v`, and these errors appear in
 `errtrace.Format`. You can mix them without losing frames from either.
 
@@ -332,7 +332,7 @@ message and attributes:
 logger.Error("request failed", slog.Any("err", err))
 ```
 
-The message stays clean and greppable; the structured fields stay queryable in
+The message stays a clean one-liner; the structured fields stay queryable in
 your log backend.
 
 Note the deliberate split: **context** — open-ended, caller-supplied key/values —

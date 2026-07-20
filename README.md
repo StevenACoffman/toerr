@@ -26,7 +26,7 @@ leaf error and records the call site.
 [`Wrap`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Wrap) adds the
 current call site to an existing error (no message change).
 [`WrapWithMessage`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#WrapWithMessage)
-also prepends a message.
+also prefixes a message.
 
 ```go
 err := errors.New("connect")
@@ -81,15 +81,15 @@ main.main
 	/app/main.go:9
 ```
 
-There is no full stack trace and no runtime tail — only the frames you wrapped
+No full stack trace and no runtime tail — only the frames you wrapped
 through. (This matches [`braces.dev/errtrace`](https://github.com/bracesdev/errtrace),
 whose return-trace model and tree formatting this package follows.)
 
-### Interoperability with Errtrace
+### Interoperability with `errtrace`
 
-The trace is built on errtrace's exported marker interface — any error with a
+The trace is built on `errtrace`'s exported marker interface — any error with a
 `TracePC() uintptr` method contributes a frame — and this package's error types
-implement it. So the two packages interoperate in both directions: an
+implement it, so the two packages interoperate in both directions: an
 `errtrace.Wrap`-ed error nested in one of these chains shows up in `%+v`, and
 these errors show up in `errtrace.Format`. You can mix the two freely.
 
@@ -146,7 +146,7 @@ different representations:
     be a statically-typed `error`, not `slog.Any("cause", err)` boxed into a value
     and read back with a string lookup and a type assertion that can silently fail.
   - `slog.Value` has no first-class `error` or `uintptr` kind, so folding
-    `cause`/`pc` into attrs loses the type the compiler otherwise enforces.
+    `cause`/`pc` into attributes loses the type the compiler otherwise enforces.
   - Keeping `msg`/`cause`/`pc` out of the caller-owned attr namespace means a
     caller who passes `slog.String("msg", …)` cannot collide with the error's own
     message.
@@ -179,7 +179,7 @@ contract-bearing → named fields.
 - [remko/go-errors](https://github.com/remko/go-errors) — the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)
   by @myrjola — message + `pc` + `slog.Attr`.
-- [xerrors / errcontext](https://github.com/zircuit-labs/zkr-go-common-public/blob/dc1effe2259f5592f9c38fcc4079aeca0f555cd9/xerrors/errcontext/errcontext.go)
+- [`xerrors` / `errcontext`](https://github.com/zircuit-labs/zkr-go-common-public/blob/dc1effe2259f5592f9c38fcc4079aeca0f555cd9/xerrors/errcontext/errcontext.go)
   by @alif-zrc — attaching `slog.Attr` context.
 
 ## Why?
@@ -191,8 +191,8 @@ Unlike the standard library `errors` package, where wrapping errors using Go 1.1
 library wrapping errors using `errors.Wrap` will record the file/line/function of the wrap operation. Creating a new error using this library
 using `New` will also record the initial file/line/function of the error creation.
 
-Since errors are often ultimately reported using structured logging, this library seeks to leverage the slog.Attr key-value pair for storing
-custom error contextual information, so that LogAttrs(ctx context.Context, level Level, msg string, attrs ...Attr) can be used for reporting
+Since errors are often ultimately reported using structured logging, this library seeks to leverage the `slog.Attr` key-value pair for storing
+custom error contextual information, so that `LogAttrs(ctx context.Context, level Level, msg string, attrs ...Attr)` can be used for reporting
 the error as it is more efficient. Both `Wrap` and `New` have `attrs ...Attr` as their optional, final trailing argument.
 
 Errors are also used for control flow. An error that was created by this library via `New` or wrapped via `Wrap` can be transparently marked
@@ -207,7 +207,7 @@ need to be altered in the code to better meet these requirements and adhere to t
 
 With stack traces, caller information for the goroutine is captured once when the error is created.
 
-In constrast, errtrace records the caller information incrementally, following the return path the error takes to get to the user. This
+In contrast, `errtrace` records the caller information incrementally, following the return path the error takes to get to the user. This
 approach works even if the error isn't propagated directly through function returns, and across goroutines.
 
 Aside from stylistic formatting, in straightforwardly explicit, synchronous Go code where the frames are ordered from origin to deepest, a
@@ -223,7 +223,7 @@ Would instead be a return trace of:
 [Pasted text #2 +5 lines]
 ```
 
-These look similar, as the package and function names are duplicative (`braces.dev/errtrace_test.rateLimitDialer`), and the call locations
+These look similar, as the package and function names are repetitive (`braces.dev/errtrace_test.rateLimitDialer`), and the call locations
 have the same files (`/errtrace/example_stack_test.go`) but each call line position (`/errtrace/example_stack_test.go:81`) differs from the
 return line position (`/path/to/errtrace/example_http_test.go:72`).
 
@@ -248,7 +248,7 @@ handling, the more impactful the error, and the more cognitively difficult to re
 A stacktrace provides the answer to the question "how did we get to where the error was originally created?"
 A return trace provides the answer to the question "how did not handling this earlier escalate and exacerbate the problem?"
 
-Error codepaths are typically much less frequently executed and triggering them in tests can be difficult. As a result, they usually are only
+Error code paths are typically much less frequently executed and triggering them in tests can be difficult. As a result, they usually are only
 cognitively reviewed once or twice during development, and never truly exercised until a user hits them in production.
 
 By its nature, the state of the world when an error occurs is often more complex than the
