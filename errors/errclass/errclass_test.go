@@ -2,20 +2,17 @@ package errclass_test
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/StevenACoffman/toerr/errors/errclass"
 )
 
 var (
-	errTest    = fmt.Errorf("this is a test error")
-	errTestToo = fmt.Errorf("this is also test error")
+	errTest    = errors.New("this is a test error")
+	errTestToo = errors.New("this is also test error")
 )
 
 func TestErrClass(t *testing.T) {
-	t.Parallel()
-
 	testCases := []struct {
 		testName string
 		err      error
@@ -50,7 +47,6 @@ func TestErrClass(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.testName, func(t *testing.T) {
-			t.Parallel()
 			err := errclass.WrapAs(tc.err, tc.class)
 			class := errclass.GetClass(err)
 			if class != tc.class {
@@ -61,8 +57,6 @@ func TestErrClass(t *testing.T) {
 }
 
 func TestErrClassUnknown(t *testing.T) {
-	t.Parallel()
-
 	// errTest doesn't have a class assigned
 	class := errclass.GetClass(errTest)
 	if class != errclass.Unknown {
@@ -71,8 +65,6 @@ func TestErrClassUnknown(t *testing.T) {
 }
 
 func TestErrClassJoined(t *testing.T) {
-	t.Parallel()
-
 	testCases := []struct {
 		testName      string
 		classA        errclass.Class
@@ -173,7 +165,6 @@ func TestErrClassJoined(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.testName, func(t *testing.T) {
-			t.Parallel()
 			errA := errclass.WrapAs(errTest, tc.classA)
 			if tc.classA == errclass.Nil {
 				errA = nil

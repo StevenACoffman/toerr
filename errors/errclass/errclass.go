@@ -1,12 +1,7 @@
 // Package errclass provides functions for simple error classification.
 package errclass
 
-import (
-	"github.com/StevenACoffman/toerr/errors/xerrors"
-)
-
-// Class represents a type of error.
-type Class int
+import "errors"
 
 // These are the allowed error classifications.
 // The values are arbitrary but provide a strict ordering,
@@ -23,7 +18,17 @@ const (
 	Panic Class = 900
 )
 
-// String implements stringer interface.
+// Class represents a type of error.
+type Class int
+
+// withClassError carries a Class classification for an error. It is transparent to
+// Error and Unwrap so it does not disturb message or identity matching.
+type withClassError struct {
+	cause error
+	class Class
+}
+
+// String implements the fmt.Stringer interface.
 func (c Class) String() string {
 	switch c {
 	case Nil:
@@ -44,24 +49,38 @@ func WrapAs(err error, class Class) error {
 	if err == nil {
 		return nil
 	}
-	return xerrors.Extend(class, err)
+	return &withClassError{cause: err, class: class}
 }
 
-// GetClass extracts the Class from an error.
+// GetClass extracts the Class from an error. For a joined error it returns the
+// highest class among its members; an unclassified non-nil error is Unknown.
 func GetClass(err error) Class {
 	if err == nil {
 		return Nil
 	}
 
 	maxClass := Nil
-	joinedErrs := xerrors.Unjoin(err)
-	for _, joinedErr := range joinedErrs {
-		class, ok := xerrors.Extract[Class](joinedErr)
-		if ok && class > maxClass {
-			maxClass = class
-		} else if !ok && maxClass < Unknown {
+	for _, joinedErr := range unjoin(err) {
+		var wc *withClassError
+		if errors.As(joinedErr, &wc) {
+			if wc.class > maxClass {
+				maxClass = wc.class
+			}
+		} else if maxClass < Unknown {
 			maxClass = Unknown
 		}
 	}
 	return maxClass
+}
+
+func (e *withClassError) Error() string { return e.cause.Error() }
+func (e *withClassError) Unwrap() error { return e.cause }
+
+// unjoin returns the members of a joined error, or the error itself if it is not
+// a multi-error.
+func unjoin(err error) []error {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		return joined.Unwrap()
+	}
+	return []error{err}
 }
