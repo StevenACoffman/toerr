@@ -7,7 +7,9 @@ path explicit.
 
 This guide starts from the standard library and builds up to the techniques this
 repository provides. Each section answers one question: *given this situation,
-which tool do I reach for, and why?*
+which tool do I reach for, and why?* For how responsibilities split between this
+library and your own application code, see
+[Mechanism and Domain](mechanism-and-domain.md).
 
 ## The Error Interface
 
@@ -150,6 +152,13 @@ if _, ok := errors.AsType[*RateLimitError](err); ok { // matches anywhere up the
 Prefer a custom type or a mark when callers must *branch on a category*; prefer a
 sentinel when they match a single well-known value.
 
+One caveat on the example above: `StatusCode` stands for an *upstream* API status
+— illustrative structured data, not this service's own transport status.
+Do not bake your own HTTP or gRPC status into an error type; carry it as a domain
+code and map it at the edge (see
+[Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
+For most application errors a code is simpler than a bespoke struct.
+
 ## Wrapping for Context — and What `%w` Leaves Out
 
 As an error travels up the call stack, each layer can add context with the `%w`
@@ -209,6 +218,14 @@ main.initApp
 Each `New` and `Wrap` records a single frame — its own call site. Collected along
 the chain and printed origin-first, they form a **return trace**: the path the
 error took as it was returned out to the caller.
+
+This is the automatic successor to the manual *logical stack trace* — the older
+convention of tagging each wrap with an `Op` string such as
+`"UserService.CreateUser"` so an operator could read the program flow on a single
+line. Here the compiler records the location for you, so there is no `Op` to write
+or keep in sync. If you still want that one-line, greppable form in the message,
+pass it to `WrapWithMessage` — for example
+`errors.WrapWithMessage(err, "sqlite.UserService.CreateUser")`.
 
 This is a different thing from a stack trace. A stack trace is captured once, at
 creation, and answers *how did we get to where the error started?* A return trace
@@ -287,6 +304,13 @@ func (s *Store) FindUser(ctx context.Context, id int) (*User, error) {
 	return u, nil
 }
 ```
+
+A single `errcode.WithCode` call carries a code, a user message, *and* the wrapped
+cause together. That is a deliberate simplification of the classic split — where a
+*leaf* error holds the code and message and a separate *wrapping* error holds the
+cause, never both on one value. `errcode` is instead one translate-and-wrap layer:
+it records the domain code at the same boundary where it captures the underlying
+error.
 
 At the edge of the program, read the code back and map it to the transport —
 without knowing anything about the concrete error type:
@@ -435,7 +459,9 @@ graph TD
     cannot improve the outcome; where you can, design the error out of existence.
 09. Return errors rather than logging and continuing — let one high-level handler
     log the error with its trace and decide the response.
-10. Keep messages lowercase and free of trailing punctuation.
+10. Never return `(nil, nil)` from a single-entity lookup — a missing entity is a
+    not-found error, not a nil result.
+11. Keep messages lowercase and free of trailing punctuation.
 
 ## The Packages in This Repository
 
