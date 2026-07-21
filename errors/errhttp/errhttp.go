@@ -1,5 +1,3 @@
-// Package errhttp maps transport-neutral errcode status codes to HTTP. It is the
-// adapter layer: HTTP concerns live here, not in the domain errcode package.
 package errhttp
 
 import (

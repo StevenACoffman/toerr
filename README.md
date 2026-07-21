@@ -325,7 +325,7 @@ contract-bearing → named fields.
   `errors.WrapWithMessage(err, "some message")` to gain location and attributes.
 - Use the `sentinel` package for package-level sentinel values.
 
-## Packages
+## Subpackages
 
 | Package    | Purpose                                                                   |
 | ---------- | ------------------------------------------------------------------------- |
@@ -335,8 +335,16 @@ contract-bearing → named fields.
 | `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
 | `errclass` | Coarse severity classification that folds across joined errors.           |
 
+Each subpackage has its own README:
+
+- [`sentinel`](sentinel/) — stack-free sentinels that match by identity.
+- [`errcode`](errcode/) — attach transport-neutral status codes to errors.
+- [`errhttp`](errhttp/) — map a coded error to an HTTP status and safe message.
+- [`errclass`](errclass/) — classify error severity for retry decisions.
+
 ## Prior Art
 
+- [Failure is Your Domain](https://www.gobeyond.dev/failure-is-your-domain/) - Philosophy of Errors
 - [braces.dev/errtrace](https://github.com/bracesdev/errtrace) - the Zig style return trace
 - [remko/go-errors](https://github.com/remko/go-errors) — the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)
@@ -344,4 +352,4 @@ contract-bearing → named fields.
 - [`xerrors` / `errcontext`](https://github.com/zircuit-labs/zkr-go-common-public/blob/dc1effe2259f5592f9c38fcc4079aeca0f555cd9/xerrors/errcontext/errcontext.go)
   by @alif-zrc — attaching `slog.Attr` context.
 - [errors/errors.go](https://github.com/upspin/upspin/blob/master/errors/errors.go)
-  </content>
+

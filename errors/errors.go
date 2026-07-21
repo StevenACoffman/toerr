@@ -1,11 +1,3 @@
-// Package errors is a drop-in replacement for the standard errors package that
-// records the call site of New/Wrap, carries slog attributes for structured
-// logging, and supports transparent type marks for control flow.
-//
-// The return trace is built on the same exported marker interface as
-// braces.dev/errtrace — any error with a TracePC() uintptr method contributes a
-// frame — so the two packages interoperate: errtrace-wrapped errors appear in
-// this package's %+v output, and these errors appear in errtrace.Format.
 package errors
 
 import (

@@ -1,6 +1,3 @@
-// Package errcode attaches transport-neutral status codes to errors. Mapping a
-// code to a transport (HTTP, gRPC) is the job of an adapter package such as
-// errhttp — no transport concern belongs here.
 package errcode
 
 // from https://github.com/remko/go-errors/blob/main/code.go

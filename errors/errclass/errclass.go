@@ -1,4 +1,3 @@
-// Package errclass provides functions for simple error classification.
 package errclass
 
 import "errors"
