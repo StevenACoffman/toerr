@@ -49,6 +49,11 @@ func StatusMessage(code errcode.StatusCode, message string) (int, string) {
 
 // Error maps the status code attached to err to an HTTP status and message.
 // Use it at the transport boundary: status, msg := errhttp.Error(err).
+//
+// It is the end-user safety boundary for HTTP: the message is the error's
+// user-facing message (errcode.Message), falling back to the generic HTTP status
+// text when none is set. It never returns err.Error(), so wrapped internal
+// detail is not exposed to clients.
 func Error(err error) (int, string) {
 	code, message := errcode.Code(err)
 	return StatusMessage(code, message)

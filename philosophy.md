@@ -305,6 +305,24 @@ HTTP, gRPC, or a CLI unchanged — each transport gets its own thin adapter.
 Keeping the transport mapping at the boundary means the same error works
 unchanged whether it surfaces over HTTP, gRPC, or a CLI.
 
+### Three Audiences, Three Views
+
+One error serves three consumers, and each gets a different view — never the same
+one:
+
+- The **application** branches on the machine code: `errcode.Status(err)`.
+- The **end user** sees a safe, human message: `errcode.Message(err)` (or, at an
+  HTTP edge, `errhttp.Error`). When it is empty, supply your own generic text —
+  `cmp.Or(errcode.Message(err), "something went wrong")`.
+- The **operator** gets the full detail and return trace: `fmt.Sprintf("%+v", err)`
+  in a log.
+
+The one rule that ties them together is a security boundary: **never show
+`err.Error()` or `%+v` to an end user.** Those are the operator view and may
+expose wrapped internal detail (a database error revealing schema, a file path).
+Messages from `New`/`WrapWithMessage` are operator-facing; only an `errcode`
+message is vetted for users.
+
 ## Attaching Context for Logs
 
 When the useful context is structured data rather than prose — a user ID, a

@@ -1,23 +1,79 @@
 # Errors
 
-A drop-in replacement for the Go standard library `errors` package that records
-where errors are created and wrapped, carries `slog` attributes for structured
-logging, and supports transparent type marks for control flow.
+**Go's `%w` tells you *what* failed, not *where*. This package adds the where.**
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/StevenACoffman/toerr/errors.svg)](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors)
+
+When a Go service fails in production, `fmt.Errorf("...: %w", err)` gives you a
+string like `dial database: connect: connection refused` — but not the file,
+line, or function that produced it. Finding the failure means grepping the source
+for message fragments and guessing which of three call sites logged it.
+
+This is a drop-in replacement for the standard library `errors` package. `New` and
+`Wrap` record the call site every time, so the same failure arrives with the path
+it took attached:
+
+```go
+// Standard library: what failed.
+return fmt.Errorf("dial database: %w", err)
+// dial database: connection refused
+
+// This package: what failed, and where.
+return errors.WrapWithMessage(err, "dial database")
+// dial database: connection refused
+//
+// main.dialDB
+//     /app/db.go:20
+// main.startup
+//     /app/main.go:14
+```
+
+The cost is one import change. Everything the standard library gives you —
+`Is`, `As`, `Unwrap`, `Join` — is re-exported unchanged, and errors from other
+packages flow through untouched.
+
+## The Problem
+
+Error paths are the least-exercised code in a program: triggered rarely, reviewed
+once or twice during development, and often first run for real when a user hits them
+in production — where the state of the world is more complicated than the success
+path, and where the engineer reading the log did not write the code.
+
+By the time an error surfaces at the top of a handler, it was created deep in some
+dependency and handled by no one on the way up. To act on it, that engineer needs
+three things — and the standard library discards all three as the error travels
+outward:
+
+- **Where it happened.** `fmt.Errorf` with `%w` concatenates strings; it keeps
+  no file, line, or function. `errors.Is` still works, but "where did this come
+  from?" means grepping the source for message fragments.
+- **What the state was.** The inputs, identifiers, and state that explain the failure
+  are in scope only near the origin. A plain error string carries none of it forward
+  to where the error is logged.
+- **What kind of failure it is.** Reacting to a category — not found, rate limited,
+  retryable — across layers of wrapping takes more than comparing message strings.
+
+This package restores all three: a **return trace** for *where*, structured
+**`slog.Attr`** for *what state*, and type **marks** for *what kind*.
+
+## What You Get
+
+- **[Location at every hop](#message-and-location)** — `New` and `Wrap` capture
+  file, line, and function.
+- **[Structured context](#structured-attributes)** — every constructor takes
+  trailing `slog.Attr` values, and errors implement `slog.LogValuer`.
+- **[A return trace](#return-trace)** under `%+v`, not a heavyweight stack trace.
+- **[Type marks for control flow](#marks-and-astype)** — `Mark` / `AsType` tag an
+  error by type without disturbing its message or `Unwrap` chain.
+- **[A true drop-in](#drop-in-replacement)** — `Is`, `As`, `Unwrap`, `Join`
+  re-exported unchanged; foreign errors interoperate.
+
+Intended for larger projects where the trade-offs of a batteries-included error
+package outweigh YAGNI.
 
 ```go
 import errors "github.com/StevenACoffman/toerr/errors"
 ```
-
-## Features
-
-- [Message and location](#message-and-location)
-- [Structured attributes](#structured-attributes)
-- [Return trace](#return-trace)
-- [Marks and `AsType`](#marks-and-astype)
-- [Design: structure vs. context](#design-structure-vs-context)
-- [Drop-in replacement for the std `errors` package](#drop-in-replacement)
 
 ## Message and Location
 
@@ -62,6 +118,9 @@ message and attributes:
 logger.Error("request failed", slog.Any("err", err))
 ```
 
+The reasoning behind carrying `slog.Attr` on the error is in
+[Design → Context as `slog.Attr`](#context-as-slogattr).
+
 ## Return Trace
 
 Each `New` and `Wrap` records a single frame — its own call site. Together they
@@ -83,7 +142,9 @@ main.main
 
 No full stack trace and no runtime tail — only the frames you wrapped
 through. (This matches [`braces.dev/errtrace`](https://github.com/bracesdev/errtrace),
-whose return-trace model and tree formatting this package follows.)
+whose return-trace model and tree formatting this package follows.) For why a
+return trace is usually the more useful artifact, see
+[Design → Return traces, not stack traces](#return-traces-not-stack-traces).
 
 ### Interoperability with `errtrace`
 
@@ -132,26 +193,126 @@ if _, ok := errors.AsType[*NotFoundError](err); ok {
 }
 ```
 
-## Design: Structure Vs. Context
+## Design
 
-`New` and `Wrap` take trailing `attrs ...slog.Attr` for open-ended, caller-supplied
-context, but the error's own fields (`msg`, `cause`, `pc`) are typed struct fields,
-**not** attrs with well-known keys. The two carry different kinds of data and want
-different representations:
+Three decisions distinguish this package from wrapping with `fmt.Errorf`, and each
+answers one of the three needs from [The Problem](#the-problem): *where*, *what
+state*, and how the error is represented so both hold.
 
-- **Context** is arbitrary key/values chosen by the caller. That is genuinely
-  open-ended, so it belongs in `[]slog.Attr`.
-- **Structure** is the error's identity and shape, and it is contract-bearing:
-  - `cause` feeds `Unwrap() error`, which `errors.Is`/`As`/`AsType` walk. It must
-    be a statically-typed `error`, not `slog.Any("cause", err)` boxed into a value
-    and read back with a string lookup and a type assertion that can silently fail.
-  - `slog.Value` has no first-class `error` or `uintptr` kind, so folding
-    `cause`/`pc` into attributes loses the type the compiler otherwise enforces.
-  - Keeping `msg`/`cause`/`pc` out of the caller-owned attr namespace means a
-    caller who passes `slog.String("msg", …)` cannot collide with the error's own
-    message.
-  - The struct keeps the shape invariant expressible — a leaf has `msg` and no
-    `cause`; a wrapper has `cause` and no `msg`; both always have a `pc`.
+### Return Traces, Not Stack Traces
+
+**A stack trace shows how an error was born. In production you usually need to know
+how it got away.**
+
+An error surfaces at the top of a request handler. It was created deep in some
+dependency, handled by no one on the way up, and is now being read by an on-call
+engineer who did not write the code that produced it. Two questions matter: where
+did this come from, and why did nothing deal with it sooner?
+
+A stack trace answers only the first, and it answers it at a cost. It is captured
+once, at creation, for the goroutine that was running then. The instant the error
+is buffered, sent over a channel, or returned from a worker, that recorded stack
+describes a call structure that no longer has anything to do with how the error
+reached you. It is also mechanical and complete: every runtime and framework frame
+is included, so the signal you want — your code — is buried in dispatch noise. And
+it points at the creation site, which the error message has often already told you.
+`connection refused` rarely leaves you wondering *what* the operation was.
+
+A return trace answers the second question, the one you could not already answer. It
+is not snapshotted; it is assembled on the way out, one frame per wrap, following
+the error value itself. Because Go errors are values that are passed rather than
+exceptions that are thrown, each frame marks a function that saw the error and chose
+to return it instead of handling it. The trace is a log of declined-to-handle
+decisions, and it ends at the one place the error was finally dealt with. That is
+where the propagation bug lives — the layer that should have retried, translated, or
+swallowed the failure and did not — and it is nowhere in a creation-time stack.
+
+The two are two sides of a symmetric, arcing path through the codebase. Creation is
+the shared apex: the origin stack descends to it, the return trace climbs back out.
+
+```text
+  main.coreOuter   :15   ┐
+  main.coreMid     :14   │  return trace  (how it escalated out)
+  main.coreOrigin  :13   ┤  ← apex: where the error was created
+  main.coreMid     :14   │  origin stack  (how we got to creation)
+  main.coreOuter   :15   │
+  main.TestOrder   :22   │
+  runtime.goexit         ┘
+```
+
+Four properties make the return trace the more useful side for most production
+errors:
+
+- **It follows the value, not the goroutine.** It stays truthful across channels,
+  buffers, and worker pools, exactly the cases where a creation-time stack goes
+  stale.
+- **Its length is a signal.** The number of frames is the number of layers that
+  declined to handle the error — its escalation distance. A long return trace is a
+  measurement, not merely a location.
+- **It is authored, not mechanical.** Frames appear only where your code wrapped,
+  so there is no runtime tail and no framework noise to read past.
+- **It branches.** Combined failures (`errors.Join`) each carry their own return
+  path, so the trace renders as a tree. A linear stack cannot express "this failure
+  is two independent failures that met here."
+
+This is not a claim that stack traces are useless. When the bug is *at* the creation
+site — a bad input, a violated precondition, a nil dereference — the descending
+stack is exactly what you want, and this package still records the creation frame to
+give it to you. The point is narrower and more practical: the error you have to
+debug in production has usually already escaped its origin, and for that error the
+path out is the path worth recording. When the code is straightforwardly
+synchronous the two sides are nearly symmetric and the return trace alone suffices;
+they diverge — and both become worth showing — precisely when an error crosses a
+goroutine or channel boundary.
+
+### Context as `slog.Attr`
+
+**The origin has the evidence; the log site has the need. Let them speak the same
+language.**
+
+Recording a failure with no context is like calling in a crime after the scene has
+been cleared. The values that explain what went wrong — the inputs, the
+identifiers, the state — are all in reach at the moment the error arises, and mostly
+out of scope by the time it surfaces at the top of a handler. In Go you rarely
+handle an error where it occurs; you return it. Each return defers handling and lets
+the context decay another hop.
+
+That is why an error value is more than a name for a failure: it is the vehicle that
+carries evidence forward, gathering more at each decision point, from the origin
+that has the most context to the log site that has the least.
+
+The log site is where that evidence is spent, and a log earns its keep only if it is
+structured — key/value pairs you can search, filter, and aggregate across voluminous
+output. "error occurred," with no fields, is not evidence.
+
+The two ends should therefore meet in one representation. If the error accumulates
+evidence, and the logger consumes `slog.Attr`, then the error should accumulate that
+evidence *as* `slog.Attr` — the exact type the logger reads. Store it any other way
+(a formatted message, a `map[string]any`, a bespoke field set) and something must
+re-key and re-type it at the log site, the point of least context and the easiest
+place to flatten a typed value into untyped text. When the error already holds
+`slog.Attr`, one `errors.Attrs(err)` call pours straight into `LogAttrs` with
+nothing in between.
+
+**An error is evidence. Store it in the type your logger already reads.**
+
+### Structure Versus Context
+
+Caller context is open-ended and belongs in `[]slog.Attr` (above). The error's own
+fields — `msg`, `cause`, `pc` — are the opposite: typed struct fields, **not** attrs
+with well-known keys. Structure is the error's identity and shape, and it is
+contract-bearing:
+
+- `cause` feeds `Unwrap() error`, which `errors.Is`/`As`/`AsType` walk. It must
+  be a statically-typed `error`, not `slog.Any("cause", err)` boxed into a value
+  and read back with a string lookup and a type assertion that can silently fail.
+- `slog.Value` has no first-class `error` or `uintptr` kind, so folding
+  `cause`/`pc` into attributes loses the type the compiler otherwise enforces.
+- Keeping `msg`/`cause`/`pc` out of the caller-owned attr namespace means a
+  caller who passes `slog.String("msg", …)` cannot collide with the error's own
+  message.
+- The struct keeps the shape invariant expressible — a leaf has `msg` and no
+  `cause`; a wrapper has a `cause` (and may or may not have a `msg`); both always have a `pc`.
 
 In short: open-ended and caller-owned → `[]slog.Attr`; fixed, typed, and
 contract-bearing → named fields.
@@ -170,91 +331,17 @@ contract-bearing → named fields.
 | ---------- | ------------------------------------------------------------------------- |
 | `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
 | `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.               |
-| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Payload`).    |
+| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Message`).    |
 | `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
 | `errclass` | Coarse severity classification that folds across joined errors.           |
 
 ## Prior Art
 
+- [braces.dev/errtrace](https://github.com/bracesdev/errtrace) - the Zig style return trace
 - [remko/go-errors](https://github.com/remko/go-errors) — the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)
   by @myrjola — message + `pc` + `slog.Attr`.
 - [`xerrors` / `errcontext`](https://github.com/zircuit-labs/zkr-go-common-public/blob/dc1effe2259f5592f9c38fcc4079aeca0f555cd9/xerrors/errcontext/errcontext.go)
   by @alif-zrc — attaching `slog.Attr` context.
-
-## Why?
-
-This repository is intended to explore various techniques to create a complete custom error framework for use as a drop-in replacement for the
-Go standard library `errors` package.
-
-Unlike the standard library `errors` package, where wrapping errors using Go 1.13's `fmt.Errorf` using `%w` only concatenates strings, in this
-library wrapping errors using `errors.Wrap` will record the file/line/function of the wrap operation. Creating a new error using this library
-using `New` will also record the initial file/line/function of the error creation.
-
-Since errors are often ultimately reported using structured logging, this library seeks to leverage the `slog.Attr` key-value pair for storing
-custom error contextual information, so that `LogAttrs(ctx context.Context, level Level, msg string, attrs ...Attr)` can be used for reporting
-the error as it is more efficient. Both `Wrap` and `New` have `attrs ...Attr` as their optional, final trailing argument.
-
-Errors are also used for control flow. An error that was created by this library via `New` or wrapped via `Wrap` can be transparently marked
-using `Mark` such that errors.AsType will return true for that type. Passing as the first parameter to `Mark` an error that was not created
-via this library `New` or `Wrap` will first `Wrap` and then `Mark`.
-
-Please examine these functional requirements against the advice in ~/Documents/agent-orange/go-advice/summary_rules.md and identify what would
-need to be altered in the code to better meet these requirements and adhere to the advice in
-~/Documents/agent-orange/go-advice/summary_rules.md
-
-## StackTraces Vs Return Traces
-
-With stack traces, caller information for the goroutine is captured once when the error is created.
-
-In contrast, `errtrace` records the caller information incrementally, following the return path the error takes to get to the user. This
-approach works even if the error isn't propagated directly through function returns, and across goroutines.
-
-Aside from stylistic formatting, in straightforwardly explicit, synchronous Go code where the frames are ordered from origin to deepest, a
-full stack trace like:
-
-```text
-[Pasted text #1 +10 lines]
-```
-
-Would instead be a return trace of:
-
-```text
-[Pasted text #2 +5 lines]
-```
-
-These look similar, as the package and function names are repetitive (`braces.dev/errtrace_test.rateLimitDialer`), and the call locations
-have the same files (`/errtrace/example_stack_test.go`) but each call line position (`/errtrace/example_stack_test.go:81`) differs from the
-return line position (`/path/to/errtrace/example_http_test.go:72`).
-
-This can be conceptualized as two sides of a symmetrical arcing parabolic path through the codebase.
-
-```text
-  main.coreOuter   :15   ┐
-  main.coreMid     :14   │  return trace  (how it escalated out)
-  main.coreOrigin  :13   ┤  ← apex: where the error was created
-  main.coreMid     :14   │  origin stack  (how we got to creation)
-  main.coreOuter   :15   │
-  main.TestOrder   :22   │
-  runtime.goexit         ┘
-```
-
-The two sides can differ significantly
-when errors are passed outside of functions and across goroutines (e.g., channels).
-
-Generally, an error is only handled once, and is otherwise just returned. The further the distance from error origination to final error
-handling, the more impactful the error, and the more cognitively difficult to reconstruct it's journey.
-
-A stacktrace provides the answer to the question "how did we get to where the error was originally created?"
-A return trace provides the answer to the question "how did not handling this earlier escalate and exacerbate the problem?"
-
-Error code paths are typically much less frequently executed and triggering them in tests can be difficult. As a result, they usually are only
-cognitively reviewed once or twice during development, and never truly exercised until a user hits them in production.
-
-By its nature, the state of the world when an error occurs is often more complex than the
-success path (since it is also may be dependent on where the error occurred).
-
-In the course of troubleshooting an issue where the error is passed outside of functions and across goroutines, I would like to make an
-ergonomic and helpful display of both sides of this parabolic path in the situations where that is helpful context.
-
-However, when both sides are neatly symmetric, I do not want to add noise.
+- [errors/errors.go](https://github.com/upspin/upspin/blob/master/errors/errors.go)
+  </content>

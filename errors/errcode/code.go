@@ -99,6 +99,21 @@ func Status(err error) StatusCode {
 	return wc.code
 }
 
+// Message returns the user-facing message attached to err, or "" if none is set.
+//
+// It is the safe, end-user view of an error: unlike err.Error(), it never
+// exposes wrapped internal detail, so it is what you show to an end user or a
+// client. When it returns "", supply your own generic message (for example with
+// cmp.Or) — never fall back to err.Error(). It reads the outermost coded error
+// in the chain.
+func Message(err error) string {
+	var wc *withCodeError
+	if !errors.As(err, &wc) {
+		return ""
+	}
+	return wc.message
+}
+
 func (e *withCodeError) Unwrap() error {
 	return e.cause
 }

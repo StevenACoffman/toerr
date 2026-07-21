@@ -62,6 +62,28 @@ func TestErrorMessage(t *testing.T) {
 	}
 }
 
+func TestMessage(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"with message": {
+			errcode.WithCode(errcode.StatusNotFound, "user not found", nil),
+			"user not found",
+		},
+		"empty message": {errcode.WithCode(errcode.StatusInternal, "", errors.New("boom")), ""},
+		"no code":       {errors.New("plain"), ""},
+		"nil":           {nil, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := errcode.Message(tc.err); got != tc.want {
+				t.Errorf("Message() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStatusCodeString(t *testing.T) {
 	if errcode.StatusNotFound.String() != "not_found" {
 		t.Errorf(
