@@ -374,6 +374,30 @@ Not every error is worth handling:
   high-level handler that logs it (with its trace) and turns it into a response,
   instead of logging-and-continuing at every layer.
 
+## How Error Propagation Works
+
+The sections above cover individual decisions. This is how they fit together as an
+error travels from where it occurs to where it is finally handled:
+
+```mermaid
+graph TD
+    A[An error occurs] --> B{Where did it originate?}
+    B -->|external package| C[Translate at the boundary<br/>errcode.WithCode]
+    B -->|our own code| D[Create a leaf error<br/>errors.New]
+    C --> F{Can this layer<br/>handle it meaningfully?}
+    D --> F
+    F -->|yes| G[Handle it here]
+    F -->|no| H[Wrap to add location<br/>errors.Wrap]
+    H --> I[Return to the caller]
+    I --> F
+    G --> Z[One top-level handler<br/>log the trace, map the code to a status]
+    I -.unhandled.-> Z
+```
+
+Two rules the diagram encodes, and the earlier prose argues for: wrapping adds
+**location**, not just a string prefix, and an error is **handled once** — at the
+single top-level handler — rather than logged at every layer on the way up.
+
 ## Choosing a Pattern
 
 ```mermaid
