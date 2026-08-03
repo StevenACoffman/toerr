@@ -1,4 +1,4 @@
-# sentinel
+# Sentinel
 
 **Cheap, stack-free sentinel errors that match by identity, like `io.EOF`.**
 

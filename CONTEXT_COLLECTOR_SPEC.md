@@ -1,4 +1,4 @@
-# Specification: context-based log-field collector
+# Specification: Context-Based Log-Field Collector
 
 Status: **draft / proposal — decision required.** Tracks TODO item 1 (Gap 3):
 "Address the absence of a `context`-based field collector that also captures
@@ -11,7 +11,7 @@ design for whichever path is chosen.
 
 ______________________________________________________________________
 
-## 1. Purpose and scope
+## 1. Purpose and Scope
 
 A request-scoped collector that accumulates structured `slog.Attr` fields across the
 layers of one request and makes them available at the boundary — for **both** the
@@ -31,7 +31,7 @@ log-once fix — is handled separately, done under TODO 1a.)
 
 ______________________________________________________________________
 
-## 2. The problem this must solve
+## 2. The Problem This Must Solve
 
 The naive implementation — a pointer to a mutable field list stashed once in the
 `context` and appended to as the stack descends — has two failure modes:
@@ -50,7 +50,7 @@ special case out of existence"), not merely detectable.
 
 ______________________________________________________________________
 
-## 3. Prior art
+## 3. Prior Art
 
 ### 3.1 `github.com/veqryn/slog-context` (`slogctx`)
 
@@ -96,7 +96,7 @@ per-scope namespacing (`slog.Group`), which preserves both values *with provenan
 
 ______________________________________________________________________
 
-## 4. Dependency impact
+## 4. Dependency Impact
 
 toerr today has **zero** third-party dependencies: a bare `go.mod` and an **empty
 `go.sum`**. For a foundational, drop-in replacement for the standard library `errors`
@@ -106,11 +106,11 @@ toerr's dependency graph, so a dependency added *here* propagates to *all* of th
 Adopting slog-context is therefore toerr's **first** external dependency. Measured with
 `go mod tidy` (local `replace`, offline):
 
-| Path | New `require` in toerr `go.mod` | Recorded in `go.sum` | Compiled into binaries |
-|---|---|---|---|
-| **Build from scratch** (`logctx`, §6) | none | none | none — stdlib `context`/`slog`/`sync` only |
-| **Adopt — import root `slogctx`** | `veqryn/slog-context` (direct) **+ `go-logr/logr` (indirect)** | both | slog-context **+ logr** |
-| **Adopt — import only `slog-context/propagate`** | `veqryn/slog-context` (direct) | slog-context **+ logr** | slog-context (logr **not** linked) |
+| Path                                             | New `require` in toerr `go.mod`                                | Recorded in `go.sum`    | Compiled into binaries                     |
+| ------------------------------------------------ | -------------------------------------------------------------- | ----------------------- | ------------------------------------------ |
+| **Build from scratch** (`logctx`, §6)            | none                                                           | none                    | none — stdlib `context`/`slog`/`sync` only |
+| **Adopt — import root `slogctx`**                | `veqryn/slog-context` (direct) **+ `go-logr/logr` (indirect)** | both                    | slog-context **+ logr**                    |
+| **Adopt — import only `slog-context/propagate`** | `veqryn/slog-context` (direct)                                 | slog-context **+ logr** | slog-context (logr **not** linked)         |
 
 Notes for reviewers:
 
@@ -132,9 +132,9 @@ cost side of the trade in §5.
 
 ______________________________________________________________________
 
-## 5. The decision: adopt vs build
+## 5. The Decision: Adopt Vs Build
 
-### 5.1 Option A — Adopt slog-context + a `Scope` namespacing layer
+### 5.1 Option a — Adopt Slog-Context + a `Scope` Namespacing Layer
 
 Use `slog-context/propagate` (or the http middleware) for the shared collector, and add
 a **thin `Scope` layer on top** to supply the collision-safety propagate lacks: a small
@@ -157,7 +157,7 @@ Optionally add `slog-dedup` at the sink for within-scope duplicates.
   library's flat ordered slice stays collision-prone if a caller bypasses the `Scope`
   wrapper and calls `propagate.With` directly.
 
-### 5.2 Option B — Build `logctx` from scratch (§6)
+### 5.2 Option B — Build `logctx` from Scratch (§6)
 
 A ~90-line stdlib-only package where `Scope` namespacing is first-class and
 collision-safety holds **by construction**.
@@ -184,7 +184,7 @@ adds the collision-safety regardless.)
 
 ______________________________________________________________________
 
-## 6. Recommended design (the build path)
+## 6. Recommended Design (The Build Path)
 
 Design principles applied (rule references name the rule, to avoid confusion with this
 document's section numbers). Ousterhout: *make modules deep* and *pull complexity
@@ -195,18 +195,18 @@ call-order*. Kleppmann: *conflict avoidance over last-write-wins*; *immutable va
 across goroutines with a single owner*; *consistent snapshot reads*; *append-only and
 order-independent*.
 
-### 6.1 Options for the concurrency model
+### 6.1 Options for the Concurrency Model
 
-| Model | Deep additions visible at boundary? | Race-free? | Collision-free? | Verdict |
-|---|---|---|---|---|
-| 1. Unguarded shared holder | yes | ✗ | ✗ | Rejected (the §2 anti-pattern) |
-| 2. Immutable copy-on-write (= slog-context `Prepend`/`Append`) | **no** | ✓ | ✓ per-branch | Secondary mode |
-| 3. Guarded shared holder + per-branch scopes (= `propagate` **+ `Scope`**) | yes | ✓ (mutex) | ✓ (scopes) | **Recommended** |
+| Model                                                                      | Deep additions visible at boundary? | Race-free? | Collision-free? | Verdict                        |
+| -------------------------------------------------------------------------- | ----------------------------------- | ---------- | --------------- | ------------------------------ |
+| 1. Unguarded shared holder                                                 | yes                                 | ✗          | ✗               | Rejected (the §2 anti-pattern) |
+| 2. Immutable copy-on-write (= slog-context `Prepend`/`Append`)             | **no**                              | ✓          | ✓ per-branch    | Secondary mode                 |
+| 3. Guarded shared holder + per-branch scopes (= `propagate` **+ `Scope`**) | yes                                 | ✓ (mutex)  | ✓ (scopes)      | **Recommended**                |
 
 Model 3 is `propagate`'s design **plus** the `Scope` namespacing that closes its
 collision gap.
 
-### 6.2 API surface (illustrative)
+### 6.2 API Surface (Illustrative)
 
 ```go
 package logctx // github.com/StevenACoffman/toerr/errors/logctx
@@ -265,7 +265,7 @@ failure-path fields, and enables the "log once" resolution.
 
 ______________________________________________________________________
 
-## 8. Testing requirements
+## 8. Testing Requirements
 
 Stdlib `testing` only; `package logctx_test`; exported-API; no type-system tautologies.
 
@@ -284,7 +284,7 @@ Stdlib `testing` only; `package logctx_test`; exported-API; no type-system tauto
 
 ______________________________________________________________________
 
-## 9. Open questions
+## 9. Open Questions
 
 1. **Build vs adopt (§5) — the headline decision**, driven mainly by the dependency
    impact (§4). Everything below assumes the outcome; confirm first.

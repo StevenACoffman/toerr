@@ -1,4 +1,4 @@
-# errhttp
+# Errhttp
 
 **Turn a coded error into an HTTP status and a client-safe message, in one call.**
 
