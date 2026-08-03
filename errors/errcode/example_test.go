@@ -21,3 +21,18 @@ func ExampleWithCode() {
 	// not_found
 	// user not found
 }
+
+// WithCodeOpaque severs the cause at a boundary: callers cannot couple to the
+// dependency's error type, but the operator text and user message survive.
+func ExampleWithCodeOpaque() {
+	cause := errors.New("sql: no rows in result set")
+	err := errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", cause)
+
+	fmt.Println(errors.Is(err, cause)) // severed: dependency error is unreachable
+	fmt.Println(err)                   // operator text still shows the cause
+	fmt.Println(errcode.Message(err))  // clean user message
+	// Output:
+	// false
+	// sql: no rows in result set (user not found)
+	// user not found
+}
