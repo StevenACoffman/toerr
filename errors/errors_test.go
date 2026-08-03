@@ -179,10 +179,11 @@ func TestMarkIsTransparent(t *testing.T) {
 }
 
 // countFrames returns the number of file:line lines in a %+v trace. Each frame
-// renders its (absolute) file path indented by a single tab, so "\t/" occurs
-// exactly once per frame.
+// renders a "<file>.go:<line>" line, so ".go:" occurs exactly once per frame.
+// Matching that, rather than a leading "/", counts frames whether the path is
+// absolute or has been made relative by -trimpath.
 func countFrames(trace string) int {
-	return strings.Count(trace, "\t/")
+	return strings.Count(trace, ".go:")
 }
 
 // A chain where the origin and each wrap live in a distinct function, so the
