@@ -1,4 +1,4 @@
-# errcode
+# Errcode
 
 **Tag an error with what kind of failure it is, without your domain code knowing about HTTP or gRPC.**
 

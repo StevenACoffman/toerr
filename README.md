@@ -336,8 +336,8 @@ worth knowing before you adopt it.
   `return err` is fine. Treat "escalation distance" as signal only where each frame
   adds information.
 - **Log once, not per layer.** Errors do not implement `slog.LogValuer`, so they do
-  not auto-expand when logged — log the error once, at a single top-level handler,
-  with `errors.Attrs` / `errors.LogValue`; lower layers wrap (for location) and
+  not auto-expand when logged. Log the error once, at a single top-level handler,
+  with `errors.Attrs` / `errors.LogValue`. Lower layers wrap (for location) and
   return, not log.
 - **Do not leak dependencies at boundaries.** `WithCode` keeps the cause matchable;
   use `WithCodeOpaque` when translating a dependency error you do not want callers
@@ -361,20 +361,20 @@ synchronous, you may not need it.
 
 ## Subpackages
 
-| Package | Purpose |
+| Package    | Purpose                                                                   |
 | ---------- | ------------------------------------------------------------------------- |
-| `errors` | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching. |
-| `errcode` | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Message`). |
-| `errhttp` | HTTP adapter for `errcode`: maps a domain code to an HTTP status. |
-| `errclass` | Coarse severity classification that folds across joined errors. |
+| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.               |
+| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Message`).    |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
+| `errclass` | Coarse severity classification that folds across joined errors.           |
 
 Each subpackage has its own README:
 
-- [`sentinel`](sentinel/): stack-free sentinels that match by identity.
-- [`errcode`](errcode/): attach transport-neutral status codes to errors.
-- [`errhttp`](errhttp/): map a coded error to an HTTP status and safe message.
-- [`errclass`](errclass/): classify error severity for retry decisions.
+- [`sentinel`](errors/sentinel/): stack-free sentinels that match by identity.
+- [`errcode`](errors/errcode/): attach transport-neutral status codes to errors.
+- [`errhttp`](errors/errhttp/): map a coded error to an HTTP status and safe message.
+- [`errclass`](errors/errclass/): classify error severity for retry decisions.
 
 ## Prior Art
 

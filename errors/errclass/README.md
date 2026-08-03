@@ -1,4 +1,4 @@
-# errclass
+# Errclass
 
 **Should you retry? Classify an error's severity so the answer survives wrapping and joining.**
 
