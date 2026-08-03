@@ -10,7 +10,11 @@ import (
 
 // Union of HTTP status codes & gRPC status codes
 // (https://grpc.github.io/grpc/core/md_doc_statuscodes.html).
-// If you add a value here, search for all switches on this enum.
+//
+// Values are assigned by iota, so append new codes at the end only: inserting or
+// reordering renumbers every code below it. Each switch on StatusCode omits its
+// default arm so the exhaustive linter fails the build until a new code is handled;
+// no manual search for switches is needed.
 const (
 	StatusUnknown StatusCode = iota
 	StatusCanceled
@@ -48,6 +52,8 @@ type withCodeError struct {
 //nolint:cyclop // flat exhaustive value mapping; inherent, not branching logic.
 func (c StatusCode) String() string {
 	switch c {
+	case StatusUnknown:
+		return "unknown"
 	case StatusCanceled:
 		return "canceled"
 	case StatusInvalidArgument:
@@ -68,9 +74,11 @@ func (c StatusCode) String() string {
 		return "failed_precondition"
 	case StatusUnimplemented:
 		return "unimplemented"
-	default:
-		return "unknown"
 	}
+	// No default arm on purpose: exhaustive (default-signifies-exhaustive) then forces
+	// every StatusCode to be named above, so a new code fails the build here. This
+	// return handles values outside the defined set.
+	return "unknown"
 }
 
 // WithCode attaches a status code (and optional user-visible message) to cause.

@@ -8,8 +8,6 @@ import (
 
 // Status maps a domain status code to an HTTP status code. Unknown codes map to
 // 500 (no logging — this is a pure mapping).
-//
-//nolint:cyclop // flat exhaustive value mapping; inherent, not branching logic.
 func Status(code errcode.StatusCode) int {
 	switch code {
 	case errcode.StatusInternal, errcode.StatusUnknown:
@@ -30,9 +28,11 @@ func Status(code errcode.StatusCode) int {
 		return http.StatusUnauthorized
 	case errcode.StatusPermissionDenied:
 		return http.StatusForbidden
-	default:
-		return http.StatusInternalServerError
 	}
+	// No default arm on purpose: exhaustive (default-signifies-exhaustive) then forces
+	// every errcode.StatusCode to be mapped above, so a new code fails the build here.
+	// This return handles values outside the defined set (StatusUnknown maps to 500).
+	return http.StatusInternalServerError
 }
 
 // StatusMessage returns the HTTP status for code and a message, defaulting the
