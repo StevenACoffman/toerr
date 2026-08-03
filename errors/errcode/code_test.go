@@ -84,6 +84,31 @@ func TestMessage(t *testing.T) {
 	}
 }
 
+func TestWithCodeOpaqueSeversChain(t *testing.T) {
+	cause := errors.New("sql: no rows in result set")
+
+	// WithCode keeps the cause reachable.
+	transparent := errcode.WithCode(errcode.StatusNotFound, "user not found", cause)
+	if !errors.Is(transparent, cause) {
+		t.Error("WithCode should keep the cause in the chain")
+	}
+
+	// WithCodeOpaque severs it, while code, message, and operator text survive.
+	opaque := errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", cause)
+	if errors.Is(opaque, cause) {
+		t.Error("WithCodeOpaque should sever the cause from errors.Is")
+	}
+	if errcode.Status(opaque) != errcode.StatusNotFound {
+		t.Errorf("Status = %v, want StatusNotFound", errcode.Status(opaque))
+	}
+	if errcode.Message(opaque) != "user not found" {
+		t.Errorf("Message = %q, want %q", errcode.Message(opaque), "user not found")
+	}
+	if got, want := opaque.Error(), "sql: no rows in result set (user not found)"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
 func TestStatusCodeString(t *testing.T) {
 	if errcode.StatusNotFound.String() != "not_found" {
 		t.Errorf(

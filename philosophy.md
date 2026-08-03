@@ -5,11 +5,21 @@ Go treats errors as ordinary values: a function that can fail returns an
 and no stack unwinding. This looks verbose at first, but it makes the failure
 path explicit.
 
+Let's do a quick review of the conventions:
++ A function returns both data and an error. A non-nil error value means that an error occurred.
++ Check the error before using any data returned from a function.
++ If there is an error, short-circuit the rest of the function.
++ Specific error messages are prepended to an existing error.
++ Error messages should start with a lower-case letter.
++ Error messages should not have line breaks or periods.
+
+None of these conventions are required by the compiler, but we will have a much easier time if we follow them.
+
 This guide starts from the standard library and builds up to the techniques this
-repository provides. Each section answers one question: *given this situation,
+repository provides. Each section answers one question: *in this situation,
 which tool do I reach for, and why?* For how responsibilities split between this
 library and your own application code, see
-[Mechanism and Domain](mechanism-and-domain.md).
+[Mechanism and Domain](./mechanism-and-domain.md).
 
 ## The Error Interface
 
@@ -39,7 +49,7 @@ defer file.Close()
 ```
 
 Handle the error where you check it, or return it to someone who can. The one
-thing never to do is ignore it — a discarded error is a bug that has not
+thing never to do is ignore it, a discarded error is a bug that has not
 happened yet.
 
 ## A Drop-in `errors` Package
@@ -53,7 +63,7 @@ adds four things the standard library leaves out:
 - Both accept trailing `slog.Attr` values, so an error carries **structured
   context** for logging, not just a string.
 - `Mark` / `AsType` let you **tag an error for control flow** by type.
-- Errors render a **return trace** under `%+v` and implement `slog.LogValuer`.
+- Errors render a **return trace** under `%+v` and satisfy `slog.LogValuer`.
 
 ```go
 import errors "github.com/StevenACoffman/toerr/errors"
@@ -65,7 +75,7 @@ The rest of this guide uses that package.
 
 A sentinel is a predefined error value that callers can recognize. Define it
 once at package level with the `Err` prefix. Use the `sentinel` package, whose
-values are cheap — they do **not** capture a stack (a stack taken at package-init
+values are cheap, and they do not capture a stack (a stack taken at package-init
 time would be meaningless):
 
 ```go
@@ -79,7 +89,7 @@ func findUser(id string) (string, error) {
 }
 ```
 
-Compare against a sentinel with `errors.Is`, **not** `==`. `errors.Is` walks the
+Compare against a sentinel with `errors.Is`, not `==`. `errors.Is` walks the
 whole chain of wrapped errors, so it keeps working even after the sentinel has
 been wrapped with extra context:
 
@@ -95,14 +105,14 @@ if errors.Is(err, io.EOF) {
 ```
 
 A sentinel matches by **identity**, so it must be a package-level variable:
-two independent `sentinel.New("not found")` values are deliberately *not* equal.
+two independent `sentinel.New("not found")` values are deliberately not equal.
 Reach for a sentinel when callers only need to answer a yes/no question: *is this
 that specific, well-known condition?*
 
 ## Custom Types and Marks: Reacting by Type with `errors.As` / `AsType`
 
-When callers need structured information — a status code, a field name, a
-retry-after duration — define a type instead of a bare value:
+When callers need structured information, a status code, a field name, a
+retry-after duration, define a type instead of a bare value:
 
 ```go
 type APIError struct {
@@ -116,7 +126,7 @@ func (e *APIError) Error() string {
 }
 ```
 
-Pull the concrete type back out with `errors.As`, which — like `errors.Is` —
+Pull the concrete type back out with `errors.As`, which, like `errors.Is`,
 searches through wrapping:
 
 ```go
@@ -136,7 +146,7 @@ if apiErr, ok := errors.AsType[*APIError](err); ok {
 ```
 
 `AsType` also works with **marks**. `Mark` tags an existing error with a marker
-whose type `AsType` will then recognize — without changing the error's message or
+whose type `AsType` will then recognize, without changing the error's message or
 its `Unwrap` chain. If the error was not produced by this package, `Mark` wraps
 it first so it still carries a trace:
 
@@ -152,14 +162,14 @@ if _, ok := errors.AsType[*RateLimitError](err); ok { // matches anywhere up the
 Prefer a custom type or a mark when callers must *branch on a category*; prefer a
 sentinel when they match a single well-known value.
 
-One caveat on the example above: `StatusCode` stands for an *upstream* API status
-— illustrative structured data, not this service's own transport status.
+One caveat on the example above: `StatusCode` stands for an *upstream* API status,
+illustrative structured data, not this service's own transport status.
 Do not bake your own HTTP or gRPC status into an error type; carry it as a domain
 code and map it at the edge (see
 [Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
 For most application errors a code is simpler than a bespoke struct.
 
-## Wrapping for Context — and What `%w` Leaves Out
+## Wrapping for Context, and What `%w` Leaves Out
 
 As an error travels up the call stack, each layer can add context with the `%w`
 verb:
@@ -171,7 +181,7 @@ if err != nil {
 }
 ```
 
-`%w` records the wrapped error as a *value*, which is why `errors.Is` and
+`%w` records the wrapped error as a *value*, so `errors.Is` and
 `errors.As` keep working through the chain. The resulting message reads as a
 trail of context:
 
@@ -181,10 +191,10 @@ init app: load config "/etc/app.yaml": open /etc/app.yaml: no such file or direc
 
 **But `fmt.Errorf` captures no file, line, or function.** It only concatenates
 strings. When that message shows up in a log, you get the *what* but not the
-*where* — you are left grepping the source for the literal text `load config`.
+*where*, you are left grepping the source for the literal text `load config`.
 
 This repository closes that gap. `Wrap` records the call site as the error passes
-through; `WrapWithMessage` does the same *and* prefixes a message:
+through; `WrapWithMessage` does the same and also prefixes a message:
 
 ```go
 // Wrap: add location (and optional attrs), no message change.
@@ -215,16 +225,16 @@ main.initApp
 
 ### Return Trace, Not Stack Trace
 
-Each `New` and `Wrap` records a single frame — its own call site. Collected along
+Each `New` and `Wrap` records a single frame, its own call site. Collected along
 the chain and printed origin-first, they form a **return trace**: the path the
 error took as it was returned out to the caller.
 
-This is the automatic successor to the manual *logical stack trace* — the older
+This is the automatic successor to the manual *logical stack trace*, the older
 convention of tagging each wrap with an `Op` string such as
 `"UserService.CreateUser"` so an operator could read the program flow on a single
 line. Here the compiler records the location for you, so there is no `Op` to write
 or keep in sync. If you still want that one-line, greppable form in the message,
-pass it to `WrapWithMessage` — for example
+pass it to `WrapWithMessage`, as in
 `errors.WrapWithMessage(err, "sqlite.UserService.CreateUser")`.
 
 This is a different thing from a stack trace. A stack trace is captured once, at
@@ -232,20 +242,20 @@ creation, and answers *how did we get to where the error started?* A return trac
 is built incrementally, one frame per wrap, and answers *how did this escalate on
 its way out?* Because it is assembled as the error propagates rather than
 captured in a single snapshot, it works even when the error is sent over a channel
-or stored and returned from a different goroutine — where a creation-time stack
+or stored and returned from a different goroutine, where a creation-time stack
 would be misleading. No full stack and no runtime tail: `%+v` shows only the
 frames you wrapped through. This follows the `braces.dev/errtrace` model.
 
-The trace machinery keys off `errtrace`'s exported marker interface — any error
-with a `TracePC() uintptr` method contributes a frame — and this package's errors
-implement it, so the two packages interoperate: an `errtrace.Wrap`-ed error
+The trace machinery keys off `errtrace`'s exported marker interface, any error
+with a `TracePC() uintptr` method contributes a frame, and this package's errors
+satisfy it, so the two packages interoperate: an `errtrace.Wrap`-ed error
 nested in one of these chains appears in `%+v`, and these errors appear in
 `errtrace.Format`. You can mix them without losing frames from either.
 
 ## Combining Independent Failures with `errors.Join`
 
 `%w` models a **chain**: this failed *because* that failed. Sometimes you instead
-have several **independent** failures that all matter at once — validation of
+have several **independent** failures that all matter at once, validation of
 many fields, errors from a batch of goroutines, or a cleanup that fails while
 handling an earlier error. `errors.Join` collects them:
 
@@ -272,8 +282,7 @@ from single wrapping (`Unwrap() error`), and it shapes how joined errors behave:
   `if m, ok := err.(interface{ Unwrap() []error }); ok { … m.Unwrap() … }`.
 - Consumers can fold across the branches. `errclass.GetClass` does exactly this:
   it walks the joined errors and returns the most severe class (`Transient` vs
-  `Persistent`), so a batch containing one persistent failure is persistent
-  overall.
+  `Persistent`), so one persistent failure makes the whole batch persistent.
 - `%+v` renders a joined error as a tree, drawing each branch under a `+-`
   connector with `|` gutters and the wrapping error's own trace at the bottom.
 
@@ -285,7 +294,7 @@ a joined one.
 
 Callers should not have to know that your storage layer happens to use
 `database/sql`, or that a lookup used the filesystem. Errors like `sql.ErrNoRows`
-and `os.ErrNotExist` are implementation details — **translate them into a domain
+and `os.ErrNotExist` are internal details, **translate them into a domain
 code at the boundary** before they escape, rather than letting callers match on
 them directly.
 
@@ -296,23 +305,31 @@ codes lives in one place:
 func (s *Store) FindUser(ctx context.Context, id int) (*User, error) {
 	u, err := s.query(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errcode.WithCode(errcode.StatusNotFound, "user not found", err)
+		// Sever the chain: callers branch on the code, never on sql.ErrNoRows.
+		return nil, errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", err)
 	}
 	if err != nil {
+		// Keep the cause and its trace: a 500 is not a category callers branch on.
 		return nil, errcode.WithCode(errcode.StatusInternal, "", err)
 	}
 	return u, nil
 }
 ```
 
-A single `errcode.WithCode` call carries a code, a user message, *and* the wrapped
-cause together. That is a deliberate simplification of the classic split — where a
-*leaf* error holds the code and message and a separate *wrapping* error holds the
-cause, never both on one value. `errcode` is instead one translate-and-wrap layer:
-it records the domain code at the same boundary where it captures the underlying
-error.
+A single `errcode` call carries a code, a user message, and the cause together,
+one translate-and-wrap layer rather than the classic split (a *leaf* holding code
+and message, a separate *wrapper* holding the cause). The one choice to make is
+whether the cause stays reachable. `WithCode` keeps it in the `Unwrap` chain, so
+callers can `errors.Is`/`As` into it (the `%w`-style contract). `WithCodeOpaque`
+**severs** it, keeping the cause's text for operators but making its type
+unreachable (the `%v`-style translation). That severing is what "translate before
+they escape" means in practice: after `WithCodeOpaque`, `errors.Is(err, sql.ErrNoRows)`
+is false, so switching storage engines cannot break a caller. Reach for
+`WithCodeOpaque` when hiding a dependency (the not-found path above); reach for
+`WithCode` when the cause is your own or the operator needs its trace (the
+`StatusInternal` path).
 
-At the edge of the program, read the code back and map it to the transport —
+At the edge of the program, read the code back and map it to the transport,
 without knowing anything about the concrete error type:
 
 ```go
@@ -324,19 +341,19 @@ func writeError(w http.ResponseWriter, err error) {
 
 The domain code lives in `errcode`; the HTTP mapping lives in the `errhttp`
 adapter. `errcode` imports no transport package, so the same coded error serves
-HTTP, gRPC, or a CLI unchanged — each transport gets its own thin adapter.
+HTTP, gRPC, or a CLI unchanged, each transport gets its own thin adapter.
 
 Keeping the transport mapping at the boundary means the same error works
 unchanged whether it surfaces over HTTP, gRPC, or a CLI.
 
 ### Three Audiences, Three Views
 
-One error serves three consumers, and each gets a different view — never the same
+One error serves three consumers, and each gets a different view, never the same
 one:
 
 - The **application** branches on the machine code: `errcode.Status(err)`.
 - The **end user** sees a safe, human message: `errcode.Message(err)` (or, at an
-  HTTP edge, `errhttp.Error`). When it is empty, supply your own generic text —
+  HTTP edge, `errhttp.Error`). When it is empty, supply your own generic text:
   `cmp.Or(errcode.Message(err), "something went wrong")`.
 - The **operator** gets the full detail and return trace: `fmt.Sprintf("%+v", err)`
   in a log.
@@ -349,8 +366,8 @@ message is vetted for users.
 
 ## Attaching Context for Logs
 
-When the useful context is structured data rather than prose — a user ID, a
-request ID, a retry count — attach it as `slog` attributes instead of formatting
+When the useful context is structured data rather than prose, a user ID, a
+request ID, a retry count, attach it as `slog` attributes instead of formatting
 it into the message. `New`, `Wrap`, and `WrapWithMessage` all take trailing
 attributes:
 
@@ -367,7 +384,7 @@ them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
-Errors also implement `slog.LogValuer`, so passing one directly promotes its
+Errors also satisfy `slog.LogValuer`, so passing one directly promotes its
 message and attributes:
 
 ```go
@@ -377,7 +394,7 @@ logger.Error("request failed", slog.Any("err", err))
 The message stays a clean one-liner; the structured fields stay queryable in
 your log backend.
 
-Note the deliberate split: **context** — open-ended, caller-supplied key/values —
+Note the deliberate split: **context** (open-ended, caller-supplied key/values)
 lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and
 call site) lives in typed fields. See the README's "structure vs. context"
 section for why.
@@ -386,7 +403,7 @@ section for why.
 
 Not every error is worth handling:
 
-- **Some failures are unrecoverable** — a violated invariant, internal
+- **Some failures are unrecoverable**: a violated invariant, internal
   inconsistency, out of memory. Prefer to `panic` at the point of detection
   rather than threading a check through code that cannot do anything useful with
   it.
@@ -394,7 +411,7 @@ Not every error is worth handling:
   absent" (which always succeeds) removes a failure mode that "delete X, error if
   missing" would introduce. The best error handling is the error that can no
   longer occur.
-- **Handle an error once, where it is meaningful.** Let it propagate to a single
+- **Handle an error once, where you can act on it.** Let it propagate to a single
   high-level handler that logs it (with its trace) and turns it into a response,
   instead of logging-and-continuing at every layer.
 
@@ -418,9 +435,9 @@ graph TD
     I -.unhandled.-> Z
 ```
 
-Two rules the diagram encodes, and the earlier prose argues for: wrapping adds
-**location**, not just a string prefix, and an error is **handled once** — at the
-single top-level handler — rather than logged at every layer on the way up.
+The diagram encodes two rules the earlier prose argues for: wrapping adds
+**location**, not just a string prefix, and an error is **handled once**, at the
+single top-level handler, rather than logged at every layer on the way up.
 
 ## Choosing a Pattern
 
@@ -443,12 +460,12 @@ graph TD
 ## Best Practices Summary
 
 01. Check every returned error. Never discard one with `_` in real code.
-02. Compare with `errors.Is` and extract with `errors.As` / `AsType` — never `==`
+02. Compare with `errors.Is` and extract with `errors.As` / `AsType`: never `==`
     or a bare type assertion, which miss wrapped errors.
 03. Wrap for context as errors rise, but capture **location**, not just a string
-    prefix — use `errors.Wrap` / `errors.WrapWithMessage`.
+    prefix, use `errors.Wrap` / `errors.WrapWithMessage`.
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
-    at the implementation boundary; do not let them leak to callers.
+    at the boundary. Do not let them leak to callers.
 05. Use a sentinel for identity, a custom type / mark / `errcode` for structured
     data, and `errors.Join` for independent failures collected together.
 06. Keep structured context in `slog.Attr` values on the error; keep the message
@@ -457,21 +474,42 @@ graph TD
     the error type.
 08. `panic` on unrecoverable invariant violations instead of threading checks that
     cannot improve the outcome; where you can, design the error out of existence.
-09. Return errors rather than logging and continuing — let one high-level handler
+09. Return errors rather than logging and continuing: let one high-level handler
     log the error with its trace and decide the response.
-10. Never return `(nil, nil)` from a single-entity lookup — a missing entity is a
+10. Never return `(nil, nil)` from a single-entity lookup: a missing entity is a
     not-found error, not a nil result.
 11. Keep messages lowercase and free of trailing punctuation.
 
 ## The Packages in This Repository
 
-- `errors` (root) — the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
+- `errors` (root): the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
   `AsType`, `Attrs`, and the re-exported `Is`/`As`/`Unwrap`/`Join`. Records call
   sites, carries `slog` attributes, and renders a return trace under `%+v`.
-- `sentinel` — cheap, stack-free sentinel values for `errors.Is` matching.
-- `errcode` — transport-neutral status codes (`WithCode`, `Code`, `Status`,
+- `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.
+- `errcode`: transport-neutral status codes (`WithCode`, `Code`, `Status`,
   `Payload`). No transport concern lives here.
-- `errhttp` — the HTTP adapter for `errcode`: `Status`, `StatusMessage`, and
+- `errhttp`: the HTTP adapter for `errcode`: `Status`, `StatusMessage`, and
   `Error(err)` map a domain code to an HTTP status at the boundary.
-- `errclass` — coarse severity classification (`Transient`, `Persistent`) that
+- `errclass`: coarse severity classification (`Transient`, `Persistent`) that
   folds correctly across joined errors.
+
+## Deliberate Non-Choices
+
+
+```
+func WrapWithFn(
+	err error,
+	fn func() string,
+	attrs ...slog.Attr,
+) error {
+	if err == nil {
+		return nil
+	}
+	return &annotatedError{msg: fn(), cause: err, pc: callerPC(), attrs: attrs}
+}
+func Lazyf (format string, args ...interface{}) func() string {
+	return func() string {
+		return fmt.Sprintf(format,args...)
+	}
+}
+```

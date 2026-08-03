@@ -5,43 +5,61 @@
 # Feel free to remove those if you don't want/need to use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
+# This is a Go *library*: there are no binaries to build. This release
+# publishes a reproducible source tarball, an SBOM of the module dependency
+# graph (generated with syft), a checksum file that covers every artifact — the
+# SBOM included — and a keyless cosign signature over that checksum.
+#
+# Local test:  goreleaser release --snapshot --clean   (needs syft on PATH;
+#              signing is skipped in snapshot).
+# CI:          a release workflow must install syft + cosign and grant
+#              `id-token: write` for keyless signing.
 
 version: 2
 
+project_name: toerr
+
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod tidy
-    # you may remove this if you don't need go generate
-    - go generate ./...
 
+# No binaries: library exposes only importable packages, so skip the build.
 builds:
-  - main: ./...
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - windows
-      - darwin
-    goarch:
-      - arm64
-      - amd64
-      - "386"
+  - skip: true
 
-archives:
-  - formats: [tar.gz]
-    # this name template makes the OS and Arch compatible with the results of `uname`.
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+# Resolve modules through the Go proxy so the released source is the verifiable,
+# proxy-visible source of truth.
+gomod:
+  proxy: true
+
+# The source tarball is the artifact a library's SBOM is generated from.
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+
+# SBOM of the source tree — captures the full Go module dependency graph via
+# syft (goreleaser's default SBOM generator), emitted beside the source tarball.
+sboms:
+  - id: source
+    artifacts: source
+
+# checksums.txt covers every artifact, the SBOM and source tarball included.
+checksum:
+  name_template: "checksums.txt"
+
+# Keyless cosign signature over the checksum. Because the checksum covers the
+# SBOM and the source tarball, this one signature makes all of them verifiable.
+# Runs only on real releases (skipped by --snapshot); needs cosign + id-token.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
 
 changelog:
   sort: asc
@@ -51,8 +69,25 @@ changelog:
       - "^test:"
 
 release:
-  footer: >-
+  footer: |
+    ## Verifying this release
+
+    ```bash
+    # 1. cosign signature over the checksum file (identity = the release workflow).
+    cosign verify-blob \
+      --bundle checksums.txt.sigstore.json \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --certificate-identity 'https://github.com/StevenACoffman/{{ .ProjectName }}/.github/workflows/release.yml@refs/tags/{{ .Tag }}' \
+      checksums.txt
+
+    # 2. source tarball + SBOM hash to the now-trusted checksums.
+    shasum -a 256 -c checksums.txt
+
+    # 3. GitHub build provenance.
+    gh attestation verify {{ .ProjectName }}_{{ .Version }}_source.tar.gz --repo StevenACoffman/{{ .ProjectName }}
+    ```
+
+    The SBOM is `{{ .ProjectName }}_{{ .Version }}_source.tar.gz.sbom.json` (SPDX-2.3).
 
     ---
-
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
