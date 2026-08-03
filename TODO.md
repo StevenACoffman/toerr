@@ -62,11 +62,16 @@ ______________________________________________________________________
   rather than in the message (honoring return-trace-not-stack-trace).
 - Source: Gap 6; analysis next step #5 (optional).
 
-## 6. Behavior-interface idiom — low/niche impact, medium effort
+## 6. Behavior-interface idiom — low/niche impact, medium effort — DONE
 
-- [ ] Consider a "ask the error a question" pattern (`Temporary() bool`,
-      `Timeout() bool`, à la `net.Error`) to complement identity (`sentinel`), type
-      (`AsType`/`Mark`), and stored classification (`errclass`).
+- [x] Provide an "ask the error a question" pattern to complement identity
+      (`sentinel`), type (`AsType`/`Mark`), and stored classification (`errclass`).
+- Done: `errors.AsBehavior[T]` (`errors/behavior.go`, tests in
+  `errors/behavior_test.go`) — the behavior counterpart to `AsType` for interfaces
+  that do not embed `error`. Blessed in `philosophy.md` ("React by Behavior"),
+  including the `Mark`-to-attach trick and when to prefer it over code/class/sentinel.
+  Named domain predicates (`Temporary`/`Retryable`) are deliberately left to the
+  application, per the mechanism/domain split.
 - Source: Gap 2.
 
 ## 7. `Error()` actionable vs operator-only — low impact, likely won't-fix

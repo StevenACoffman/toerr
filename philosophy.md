@@ -169,6 +169,45 @@ code and map it at the edge (see
 [Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
 For most application errors a code is simpler than a bespoke struct.
 
+## React by Behavior: Asking an Error a Question with `AsBehavior`
+
+`Is` matches on *what an error is* (identity) and `As` / `AsType` on *what type it
+is*. Sometimes you care instead about *what it can do*: is it retryable, is it a
+timeout? Define a small behavior interface and let any error that answers those
+methods match, whatever its concrete type. This is the pattern behind the standard
+library's `net.Error` (`Timeout() bool`).
+
+```go
+type retryable interface{ Retryable() bool }
+
+if r, ok := errors.AsBehavior[retryable](err); ok && r.Retryable() {
+	backoffAndRetry()
+}
+```
+
+`AsBehavior` is the behavior counterpart to `AsType`. `AsType[T]` needs `T` to be an
+error type, but a behavior interface usually is not an error (it has no `Error()`
+method), so `AsType` cannot express it and `AsBehavior` can. Like `As`, it looks
+through wrapping, finds behaviors attached with `Mark`, and traverses every branch of
+an `errors.Join`. `T` must be an interface; passing a concrete type is a programming
+error and panics.
+
+Because the match is by method, the caller couples only to its own one-method
+interface, not to your concrete type or a shared sentinel. To give a foreign error a
+behavior without owning its type, attach one with `Mark`:
+
+```go
+// *RateLimitError answers Retryable(); Mark tags err with it transparently.
+err = errors.Mark(err, &RateLimitError{})
+```
+
+Reach for a behavior when the answer is *intrinsic to the error* and you want callers
+to stay decoupled from its type. Prefer a sentinel for a single well-known value, a
+code (`errcode`) for a category the application branches on, and `errclass` for a
+coarse transient-vs-persistent severity that folds across joins. Keep behavior
+interfaces small and their meaning crisp: the standard library deprecated
+`net.Error.Temporary()` precisely because its meaning was ambiguous.
+
 ## Wrapping for Context, and What `%w` Leaves Out
 
 As an error travels up the call stack, each layer can add context with the `%w`
@@ -454,14 +493,16 @@ graph TD
     I -->|compare identity| J[errors.Is]
     I -->|pull out a typed value| K[errors.As]
     I -->|yes/no on a type| L[errors.AsType]
+    I -->|ask a behavior| N[errors.AsBehavior]
     I -->|add context, pass up| M[errors.Wrap /<br/>errors.WrapWithMessage]
 ```
 
 ## Best Practices Summary
 
 01. Check every returned error. Never discard one with `_` in real code.
-02. Compare with `errors.Is` and extract with `errors.As` / `AsType`: never `==`
-    or a bare type assertion, which miss wrapped errors.
+02. Compare with `errors.Is` and extract with `errors.As` / `AsType` (or `AsBehavior`
+    for a behavior interface): never `==` or a bare type assertion, which miss
+    wrapped errors.
 03. Wrap for context as errors rise, but capture **location**, not just a string
     prefix, use `errors.Wrap` / `errors.WrapWithMessage`.
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
@@ -483,8 +524,9 @@ graph TD
 ## The Packages in This Repository
 
 - `errors` (root): the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
-  `AsType`, `Attrs`, and the re-exported `Is`/`As`/`Unwrap`/`Join`. Records call
-  sites, carries `slog` attributes, and renders a return trace under `%+v`.
+  `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
+  `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
+  renders a return trace under `%+v`.
 - `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.
 - `errcode`: transport-neutral status codes (`WithCode`, `Code`, `Status`,
   `Payload`). No transport concern lives here.
