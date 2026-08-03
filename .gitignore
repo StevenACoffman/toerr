@@ -307,3 +307,7 @@ dist/
 
 # Rumdl - markdown linter cache
 .rumdl_cache
+# Vale - grammar checker and style lint
+.vale
+# Added by goreleaser init:
+dist/
