@@ -63,7 +63,8 @@ adds four things the standard library leaves out:
 - Both accept trailing `slog.Attr` values, so an error carries **structured
   context** for logging, not just a string.
 - `Mark` / `AsType` let you **tag an error for control flow** by type.
-- Errors render a **return trace** under `%+v` and satisfy `slog.LogValuer`.
+- Errors render a **return trace** under `%+v`, and `errors.LogValue` /
+  `errors.Attrs` turn one into structured log fields at your log boundary.
 
 ```go
 import errors "github.com/StevenACoffman/toerr/errors"
@@ -168,6 +169,45 @@ Do not bake your own HTTP or gRPC status into an error type; carry it as a domai
 code and map it at the edge (see
 [Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
 For most application errors a code is simpler than a bespoke struct.
+
+## React by Behavior: Asking an Error a Question with `AsBehavior`
+
+`Is` matches on *what an error is* (identity) and `As` / `AsType` on *what type it
+is*. Sometimes you care instead about *what it can do*: is it retryable, is it a
+timeout? Define a small behavior interface and let any error that answers those
+methods match, whatever its concrete type. This is the pattern behind the standard
+library's `net.Error` (`Timeout() bool`).
+
+```go
+type retryable interface{ Retryable() bool }
+
+if r, ok := errors.AsBehavior[retryable](err); ok && r.Retryable() {
+	backoffAndRetry()
+}
+```
+
+`AsBehavior` is the behavior counterpart to `AsType`. `AsType[T]` needs `T` to be an
+error type, but a behavior interface usually is not an error (it has no `Error()`
+method), so `AsType` cannot express it and `AsBehavior` can. Like `As`, it looks
+through wrapping, finds behaviors attached with `Mark`, and traverses every branch of
+an `errors.Join`. `T` must be an interface; passing a concrete type is a programming
+error and panics.
+
+Because the match is by method, the caller couples only to its own one-method
+interface, not to your concrete type or a shared sentinel. To give a foreign error a
+behavior without owning its type, attach one with `Mark`:
+
+```go
+// *RateLimitError answers Retryable(); Mark tags err with it transparently.
+err = errors.Mark(err, &RateLimitError{})
+```
+
+Reach for a behavior when the answer is *intrinsic to the error* and you want callers
+to stay decoupled from its type. Prefer a sentinel for a single well-known value, a
+code (`errcode`) for a category the application branches on, and `errclass` for a
+coarse transient-vs-persistent severity that folds across joins. Keep behavior
+interfaces small and their meaning crisp: the standard library deprecated
+`net.Error.Temporary()` precisely because its meaning was ambiguous.
 
 ## Wrapping for Context, and What `%w` Leaves Out
 
@@ -384,15 +424,17 @@ them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
-Errors also satisfy `slog.LogValuer`, so passing one directly promotes its
-message and attributes:
+Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight
+to a logger does not silently expand its fields at every layer (which invites
+duplicate log lines). When you want the error as a single grouped attribute, ask for
+it explicitly with `errors.LogValue`:
 
 ```go
-logger.Error("request failed", slog.Any("err", err))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
 ```
 
-The message stays a clean one-liner; the structured fields stay queryable in
-your log backend.
+Either way the message stays a clean one-liner; the structured fields stay queryable
+in your log backend.
 
 Note the deliberate split: **context** (open-ended, caller-supplied key/values)
 lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and
@@ -406,7 +448,13 @@ Not every error is worth handling:
 - **Some failures are unrecoverable**: a violated invariant, internal
   inconsistency, out of memory. Prefer to `panic` at the point of detection
   rather than threading a check through code that cannot do anything useful with
-  it.
+  it. Because `toerr` is a library, keep this distinction in mind: this applies
+  to application code, which owns the process. Library code should not `panic`
+  across its API for ordinary or expected failures; return an error instead,
+  recovering internally at the package boundary with `errors.Recover` if some
+  dependency panics. Reserve library panics for genuine programmer misuse (as
+  `AsBehavior` does on an invalid type argument) or truly unrecoverable invariant
+  violations.
 - **Some errors can be designed away.** Redefining an operation as "ensure X is
   absent" (which always succeeds) removes a failure mode that "delete X, error if
   missing" would introduce. The best error handling is the error that can no
@@ -454,14 +502,16 @@ graph TD
     I -->|compare identity| J[errors.Is]
     I -->|pull out a typed value| K[errors.As]
     I -->|yes/no on a type| L[errors.AsType]
+    I -->|ask a behavior| N[errors.AsBehavior]
     I -->|add context, pass up| M[errors.Wrap /<br/>errors.WrapWithMessage]
 ```
 
 ## Best Practices Summary
 
 01. Check every returned error. Never discard one with `_` in real code.
-02. Compare with `errors.Is` and extract with `errors.As` / `AsType`: never `==`
-    or a bare type assertion, which miss wrapped errors.
+02. Compare with `errors.Is` and extract with `errors.As` / `AsType` (or `AsBehavior`
+    for a behavior interface): never `==` or a bare type assertion, which miss
+    wrapped errors.
 03. Wrap for context as errors rise, but capture **location**, not just a string
     prefix, use `errors.Wrap` / `errors.WrapWithMessage`.
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
@@ -483,8 +533,9 @@ graph TD
 ## The Packages in This Repository
 
 - `errors` (root): the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
-  `AsType`, `Attrs`, and the re-exported `Is`/`As`/`Unwrap`/`Join`. Records call
-  sites, carries `slog` attributes, and renders a return trace under `%+v`.
+  `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
+  `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
+  renders a return trace under `%+v`.
 - `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.
 - `errcode`: transport-neutral status codes (`WithCode`, `Code`, `Status`,
   `Payload`). No transport concern lives here.

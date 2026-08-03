@@ -27,6 +27,18 @@ ______________________________________________________________________
 - Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
   remaining actionable item).
 
+### 1a. Scope `slog.LogValuer` to boundary-only (the incentive half of Gap 4) — DONE
+
+- [x] Remove `LogValue()` from `annotatedError`/`marked` (and the `_ slog.LogValuer`
+      compile assertions) so passing an error to slog no longer auto-expands into a
+      structured group at every layer.
+- [x] Expose `errors.LogValue(err) slog.Value` as an explicit boundary helper (the old
+      grouped rendering, now opt-in); `errors.Attrs(err)` remains the flat-merge option.
+- [x] Add a doc warning (philosophy.md / README) that rich structured error logging is a
+      deliberate boundary act via `errors.Attrs` / `errors.LogValue`, not a per-layer habit.
+- Note: this is the *incentive* half of Gap 4. The *enforcement* half — a lint that flags
+  error-to-logger calls outside boundary packages — remains open under item 1.
+
 ## 2. Document "when not to use this" + wrap-density guidance — medium impact, low effort
 
 - [ ] Add a short "when not to reach for this" list (shallow call graphs,
@@ -36,13 +48,16 @@ ______________________________________________________________________
       choice belongs to the caller and should be stated.
 - Source: Counterargument 2; remainder of analysis next step #2. Cheapest real win.
 
-## 3. Draw the `panic` app-vs-library line — low-medium impact, very low effort
+## 3. Draw the `panic` app-vs-library line — low-medium impact, very low effort — DONE
 
-- [ ] In "Knowing When to Give Up," state that the `panic`-on-invariant advice is
+- [x] In "Knowing When to Give Up," state that the `panic`-on-invariant advice is
       app-facing, and that library code should not panic across its boundary
       (recover internally). The guidance ships inside a library, so a reader could
       misapply it.
-- Source: Counterargument 6. A one-paragraph doc fix — bundle with item 2.
+- Done: appended to the unrecoverable-failures bullet in `philosophy.md` — library
+  code returns errors (recovering internally with `errors.Recover`), reserving
+  panics for programmer misuse or unrecoverable invariants.
+- Source: Counterargument 6.
 
 ## 4. PC-capture cost story + opt-out — medium impact, medium effort
 
@@ -62,11 +77,16 @@ ______________________________________________________________________
   rather than in the message (honoring return-trace-not-stack-trace).
 - Source: Gap 6; analysis next step #5 (optional).
 
-## 6. Behavior-interface idiom — low/niche impact, medium effort
+## 6. Behavior-interface idiom — low/niche impact, medium effort — DONE
 
-- [ ] Consider a "ask the error a question" pattern (`Temporary() bool`,
-      `Timeout() bool`, à la `net.Error`) to complement identity (`sentinel`), type
-      (`AsType`/`Mark`), and stored classification (`errclass`).
+- [x] Provide an "ask the error a question" pattern to complement identity
+      (`sentinel`), type (`AsType`/`Mark`), and stored classification (`errclass`).
+- Done: `errors.AsBehavior[T]` (`errors/behavior.go`, tests in
+  `errors/behavior_test.go`) — the behavior counterpart to `AsType` for interfaces
+  that do not embed `error`. Blessed in `philosophy.md` ("React by Behavior"),
+  including the `Mark`-to-attach trick and when to prefer it over code/class/sentinel.
+  Named domain predicates (`Temporary`/`Retryable`) are deliberately left to the
+  application, per the mechanism/domain split.
 - Source: Gap 2.
 
 ## 7. `Error()` actionable vs operator-only — low impact, likely won't-fix
