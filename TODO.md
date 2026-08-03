@@ -12,7 +12,7 @@ domain codes (Gap 7) — a documented, intentional divergence, not a defect.
 
 ______________________________________________________________________
 
-## 1. Reconcile the logging guidance — high impact, medium effort
+## 1. Reconcile the Logging Guidance — High Impact, Medium Effort
 
 - [ ] Resolve the contradiction between "log once" (preached in `philosophy.md`)
       and shipping `slog.LogValuer` on every error, which makes per-layer
@@ -22,12 +22,12 @@ ______________________________________________________________________
       **success-path** fields (cache hit/miss, durations) an error can never carry
       (Gap 3).
 - Options: add a `ctx` field-collector helper (`AddLogField(ctx, …)` style),
-      and/or scope `LogValuer` to "log at the boundary only" with an explicit
-      warning against per-layer logging.
+  and/or scope `LogValuer` to "log at the boundary only" with an explicit
+  warning against per-layer logging.
 - Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
   remaining actionable item).
 
-### 1a. Scope `slog.LogValuer` to boundary-only (the incentive half of Gap 4) — DONE
+### 1A. Scope `slog.LogValuer` to Boundary-Only (The Incentive Half of Gap 4) — DONE
 
 - [x] Remove `LogValue()` from `annotatedError`/`marked` (and the `_ slog.LogValuer`
       compile assertions) so passing an error to slog no longer auto-expands into a
@@ -39,16 +39,18 @@ ______________________________________________________________________
 - Note: this is the *incentive* half of Gap 4. The *enforcement* half — a lint that flags
   error-to-logger calls outside boundary packages — remains open under item 1.
 
-## 2. Document "when not to use this" + wrap-density guidance — medium impact, low effort
+## 2. Document "When Not to Use This" + Wrap-Density Guidance — Medium Impact, Low Effort — DONE
 
-- [ ] Add a short "when not to reach for this" list (shallow call graphs,
-      one-structured-line-per-request shops).
-- [ ] Give explicit guidance on wrap-at-every-hop vs wrap-at-boundaries; the
-      mechanism is neutral (a bare `Wrap` adds a frame with no message), so the
-      choice belongs to the caller and should be stated.
-- Source: Counterargument 2; remainder of analysis next step #2. Cheapest real win.
+- [x] "When not to reach for this" list — already carried by the README's
+      "When Not to Reach for This" section (Cheney debate, shallow/synchronous call
+      graphs, "not every project needs this").
+- [x] Wrap-at-every-hop vs wrap-at-boundaries — added the "How Often to Wrap"
+      subsection to `philosophy.md`: the mechanism is neutral (a bare `Wrap` adds a
+      frame with no message), so density is the caller's choice; wrap where a frame
+      adds information. Cross-links the README section rather than duplicating it.
+- Source: Counterargument 2; remainder of analysis next step #2.
 
-## 3. Draw the `panic` app-vs-library line — low-medium impact, very low effort — DONE
+## 3. Draw the `panic` App-Vs-Library Line — Low-Medium Impact, Very Low Effort — DONE
 
 - [x] In "Knowing When to Give Up," state that the `panic`-on-invariant advice is
       app-facing, and that library code should not panic across its boundary
@@ -59,14 +61,14 @@ ______________________________________________________________________
   panics for programmer misuse or unrecoverable invariants.
 - Source: Counterargument 6.
 
-## 4. PC-capture cost story + opt-out — medium impact, medium effort
+## 4. PC-Capture Cost Story + Opt-Out — Medium Impact, Medium Effort
 
 - [ ] Document the per-wrap `runtime.Callers` cost (paid on every `Wrap`, even for
       swallowed errors) and add a benchmark.
 - [ ] Consider a hot-path opt-out or a build-tag / debug-gated PC capture.
 - Source: Gap 5; analysis next step #4 (optional).
 
-## 5. Recover-at-boundary helper — medium impact, medium effort — DONE
+## 5. Recover-at-Boundary Helper — Medium Impact, Medium Effort — DONE
 
 - [x] Provide a helper that turns a recovered panic into a traced error, serving
       the "packages recover internally at their boundary" guidance.
@@ -77,7 +79,7 @@ ______________________________________________________________________
   rather than in the message (honoring return-trace-not-stack-trace).
 - Source: Gap 6; analysis next step #5 (optional).
 
-## 6. Behavior-interface idiom — low/niche impact, medium effort — DONE
+## 6. Behavior-Interface Idiom — Low/niche Impact, Medium Effort — DONE
 
 - [x] Provide an "ask the error a question" pattern to complement identity
       (`sentinel`), type (`AsType`/`Mark`), and stored classification (`errclass`).
@@ -89,7 +91,7 @@ ______________________________________________________________________
   application, per the mechanism/domain split.
 - Source: Gap 2.
 
-## 7. `Error()` actionable vs operator-only — low impact, likely won't-fix
+## 7. `Error()` Actionable Vs Operator-Only — Low Impact, Likely Won't-Fix
 
 - [ ] Decide whether to note the trade-off: `toerr` deliberately makes `Error()`
       operator-only (users read `errcode.Message`), whereas some advice wants

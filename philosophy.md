@@ -6,12 +6,13 @@ and no stack unwinding. This looks verbose at first, but it makes the failure
 path explicit.
 
 Let's do a quick review of the conventions:
-+ A function returns both data and an error. A non-nil error value means that an error occurred.
-+ Check the error before using any data returned from a function.
-+ If there is an error, short-circuit the rest of the function.
-+ Specific error messages are prepended to an existing error.
-+ Error messages should start with a lower-case letter.
-+ Error messages should not have line breaks or periods.
+
+- A function returns both data and an error. A non-nil error value means that an error occurred.
+- Check the error before using any data returned from a function.
+- If there is an error, short-circuit the rest of the function.
+- Specific error messages are prepended to an existing error.
+- Error messages should start with a lower-case letter.
+- Error messages should not have line breaks or periods.
 
 None of these conventions are required by the compiler, but we will have a much easier time if we follow them.
 
@@ -263,6 +264,17 @@ main.initApp
 	/app/init.go:9
 ```
 
+### How Often to Wrap
+
+`Wrap` is cheap and message-free, so wrap density is your choice, not the package's. A
+bare `Wrap(err)` adds a frame and nothing else, so you can wrap at *every* return for a
+dense origin-to-caller trace, or only where an error crosses a *package* boundary (the
+level the `wrapcheck` linter enforces) for a sparse one. Wrap where a frame adds
+information: a run of same-package pass-throughs that add no message is noise, not
+signal. When in doubt, wrap at boundaries and add a message only where you have real
+context. For whether a return trace is worth adopting in your project at all, see the
+README's "When Not to Reach for This" section.
+
 ### Return Trace, Not Stack Trace
 
 Each `New` and `Wrap` records a single frame, its own call site. Collected along
@@ -452,9 +464,8 @@ Not every error is worth handling:
   to application code, which owns the process. Library code should not `panic`
   across its API for ordinary or expected failures; return an error instead,
   recovering internally at the package boundary with `errors.Recover` if some
-  dependency panics. Reserve library panics for genuine programmer misuse (as
-  `AsBehavior` does on an invalid type argument) or truly unrecoverable invariant
-  violations.
+  dependency panics. Reserve library panics for programmer misuse (as `AsBehavior`
+  does on an invalid type argument) or truly unrecoverable invariant violations.
 - **Some errors can be designed away.** Redefining an operation as "ensure X is
   absent" (which always succeeds) removes a failure mode that "delete X, error if
   missing" would introduce. The best error handling is the error that can no
