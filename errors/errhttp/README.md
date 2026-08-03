@@ -13,10 +13,10 @@ not leaked to callers.
 
 ## Usage
 
-- `errhttp.Error(err) (int, string)` — map the code attached to `err` to an HTTP
+- `errhttp.Error(err) (int, string)`: map the code attached to `err` to an HTTP
   status and message. Use this at the transport boundary.
-- `errhttp.Status(code) int` — map an `errcode.StatusCode` to an HTTP status.
-- `errhttp.StatusMessage(code, message) (int, string)` — same, defaulting an empty
+- `errhttp.Status(code) int`: map an `errcode.StatusCode` to an HTTP status.
+- `errhttp.StatusMessage(code, message) (int, string)`: same, defaulting an empty
   message to the standard status text.
 
 ## Example
