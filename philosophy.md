@@ -495,21 +495,31 @@ graph TD
 
 ## Deliberate Non-Choices
 
+A few things this package intentionally leaves out. Each was considered and set
+aside to keep the surface small and the behavior predictable.
 
-```
-func WrapWithFn(
-	err error,
-	fn func() string,
-	attrs ...slog.Attr,
-) error {
-	if err == nil {
-		return nil
-	}
-	return &annotatedError{msg: fn(), cause: err, pc: callerPC(), attrs: attrs}
-}
-func Lazyf (format string, args ...interface{}) func() string {
-	return func() string {
-		return fmt.Sprintf(format,args...)
-	}
-}
-```
+- **No full stack traces.** Each `New`/`Wrap` records a single frame, its own call
+  site, never a captured runtime stack. The result is a return trace (see
+  [Return Trace, Not Stack Trace](#return-trace-not-stack-trace)): the path the
+  error took on the way out, with no runtime tail and far less allocation than a
+  stack snapshot.
+- **No `Op` strings.** The manual logical-stack-trace convention, tagging each wrap
+  with `"Type.Method"`, is replaced by the compiler-recorded call site, so there is
+  nothing to write or keep in sync. If you still want that one-line form in the
+  message, pass it to `WrapWithMessage`.
+- **No deferred/lazy message API.** A `Wrap` variant taking a message *callback*
+  (so an expensive message is formatted only when the error is non-nil) was
+  prototyped and dropped. In the usual `if err != nil { return WrapWithMessage(err,
+  …) }` shape the message is already built only on the error path, and a bare `Wrap`
+  adds a frame with no message at all, so the callback form added surface for a
+  micro-optimization that rarely pays off.
+- **No transport knowledge in `errcode`.** Codes are transport-neutral; the HTTP
+  mapping lives in the `errhttp` adapter, so one coded error serves HTTP, gRPC, or a
+  CLI (see
+  [Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
+- **No domain vocabulary in the library.** The library owns the mechanism; your
+  application owns the meaning, its sentinels, its reading of each code, and its
+  user-facing messages (see [Mechanism and Domain](./mechanism-and-domain.md)).
+- **No logging inside the package.** Errors are returned, not logged; a single
+  top-level handler logs once, with the trace (see
+  [Knowing When to Give Up](#knowing-when-to-give-up)).
