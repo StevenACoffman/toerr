@@ -287,7 +287,7 @@ func writeTrace(b *strings.Builder, err error, trace []runtime.Frame, path []int
 			b.WriteString("\n")
 
 			pipes(b, path, "|  ")
-			fmt.Fprintf(b, "\t%s:%d\n", frame.File, frame.Line)
+			_, _ = fmt.Fprintf(b, "\t%s:%d\n", frame.File, frame.Line)
 		}
 	}
 
