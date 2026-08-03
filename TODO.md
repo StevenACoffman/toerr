@@ -51,14 +51,15 @@ ______________________________________________________________________
 - [ ] Consider a hot-path opt-out or a build-tag / debug-gated PC capture.
 - Source: Gap 5; analysis next step #4 (optional).
 
-## 5. Recover-at-boundary helper — medium impact, medium effort — IN PROGRESS
+## 5. Recover-at-boundary helper — medium impact, medium effort — DONE
 
-- [ ] Provide a helper that turns a recovered panic into a traced
-      `annotatedError`, serving the "packages recover internally at their boundary"
-      guidance. `toerr` already captures PCs, so it is a natural fit.
-- Note: a draft `errors/recover.go` (`CoerceRecoverAnyToErr`) exists but does not
-  compile and embeds a full `debug.Stack()`, which conflicts with the
-  return-trace-not-stack-trace design. See the review for a corrected proposal.
+- [x] Provide a helper that turns a recovered panic into a traced error, serving
+      the "packages recover internally at their boundary" guidance.
+- Done: `errors.Recover(recover())` (`errors/recover.go`, tests in
+  `errors/recover_test.go`). Returns nil when there was no panic, preserves a
+  recovered error as the cause so `errors.Is`/`As` still reach it, records a frame
+  at the recovery site, and attaches the panic stack as a `"stack"` `slog.Attr`
+  rather than in the message (honoring return-trace-not-stack-trace).
 - Source: Gap 6; analysis next step #5 (optional).
 
 ## 6. Behavior-interface idiom — low/niche impact, medium effort
