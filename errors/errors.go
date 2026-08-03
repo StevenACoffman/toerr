@@ -14,12 +14,10 @@ import (
 var (
 	_ error                          = (*annotatedError)(nil)
 	_ fmt.Formatter                  = (*annotatedError)(nil)
-	_ slog.LogValuer                 = (*annotatedError)(nil)
 	_ interface{ TracePC() uintptr } = (*annotatedError)(nil)
 
 	_ error                          = (*marked)(nil)
 	_ fmt.Formatter                  = (*marked)(nil)
-	_ slog.LogValuer                 = (*marked)(nil)
 	_ interface{ TracePC() uintptr } = (*marked)(nil)
 )
 
@@ -134,8 +132,6 @@ func (e *annotatedError) TracePC() uintptr { return e.pc }
 
 func (e *annotatedError) Format(s fmt.State, verb rune) { formatError(e, s, verb) }
 
-func (e *annotatedError) LogValue() slog.Value { return logValue(e) }
-
 func (e *annotatedError) attributes() []slog.Attr { return e.attrs }
 
 func (m *marked) Error() string { return m.cause.Error() }
@@ -148,8 +144,6 @@ func (m *marked) Unwrap() error { return m.cause }
 func (m *marked) TracePC() uintptr { return 0 }
 
 func (m *marked) Format(s fmt.State, verb rune) { formatError(m, s, verb) }
-
-func (m *marked) LogValue() slog.Value { return logValue(m) }
 
 // As reports the marker's type to errors.As, so AsType matches it.
 func (m *marked) As(target any) bool { return As(m.marker, target) }
@@ -192,8 +186,17 @@ func formatError(err error, s fmt.State, verb rune) {
 	}
 }
 
-// logValue renders the error and every attribute in its chain for slog.
-func logValue(err error) slog.Value {
+// LogValue renders err as a slog group of its message plus every attribute in its
+// chain (msg, then Attrs). It is an explicit boundary helper: these errors deliberately
+// do NOT implement slog.LogValuer, so passing an error to a logger does not auto-expand
+// into structured fields at every layer (which invites the stacked-logline anti-pattern).
+// Instead, log the error once, where you handle it, e.g.
+//
+//	slog.Any("err", errors.LogValue(err))          // the grouped form, or
+//	logger.LogAttrs(ctx, lvl, err.Error(), errors.Attrs(err)...) // the flat form
+//
+// It works for any error; a foreign error yields a group with just the message.
+func LogValue(err error) slog.Value {
 	return slog.GroupValue(append([]slog.Attr{slog.String("msg", err.Error())}, Attrs(err)...)...)
 }
 

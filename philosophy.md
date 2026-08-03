@@ -63,7 +63,8 @@ adds four things the standard library leaves out:
 - Both accept trailing `slog.Attr` values, so an error carries **structured
   context** for logging, not just a string.
 - `Mark` / `AsType` let you **tag an error for control flow** by type.
-- Errors render a **return trace** under `%+v` and satisfy `slog.LogValuer`.
+- Errors render a **return trace** under `%+v`, and `errors.LogValue` /
+  `errors.Attrs` turn one into structured log fields at your log boundary.
 
 ```go
 import errors "github.com/StevenACoffman/toerr/errors"
@@ -423,15 +424,17 @@ them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
-Errors also satisfy `slog.LogValuer`, so passing one directly promotes its
-message and attributes:
+Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight
+to a logger does not silently expand its fields at every layer (which invites
+duplicate log lines). When you want the error as a single grouped attribute, ask for
+it explicitly with `errors.LogValue`:
 
 ```go
-logger.Error("request failed", slog.Any("err", err))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
 ```
 
-The message stays a clean one-liner; the structured fields stay queryable in
-your log backend.
+Either way the message stays a clean one-liner; the structured fields stay queryable
+in your log backend.
 
 Note the deliberate split: **context** (open-ended, caller-supplied key/values)
 lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and

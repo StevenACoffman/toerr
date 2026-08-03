@@ -27,6 +27,18 @@ ______________________________________________________________________
 - Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
   remaining actionable item).
 
+### 1a. Scope `slog.LogValuer` to boundary-only (the incentive half of Gap 4) — DONE
+
+- [x] Remove `LogValue()` from `annotatedError`/`marked` (and the `_ slog.LogValuer`
+      compile assertions) so passing an error to slog no longer auto-expands into a
+      structured group at every layer.
+- [x] Expose `errors.LogValue(err) slog.Value` as an explicit boundary helper (the old
+      grouped rendering, now opt-in); `errors.Attrs(err)` remains the flat-merge option.
+- [x] Add a doc warning (philosophy.md / README) that rich structured error logging is a
+      deliberate boundary act via `errors.Attrs` / `errors.LogValue`, not a per-layer habit.
+- Note: this is the *incentive* half of Gap 4. The *enforcement* half — a lint that flags
+  error-to-logger calls outside boundary packages — remains open under item 1.
+
 ## 2. Document "when not to use this" + wrap-density guidance — medium impact, low effort
 
 - [ ] Add a short "when not to reach for this" list (shallow call graphs,

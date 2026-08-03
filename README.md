@@ -61,7 +61,8 @@ This package restores all three: a **return trace** for *where*, structured
 - **[Location at every hop](#message-and-location)**: `New` and `Wrap` capture
 file, line, and function.
 - **[Structured context](#structured-attributes)**: every constructor takes
-trailing `slog.Attr` values, and errors satisfy `slog.LogValuer`.
+trailing `slog.Attr` values, surfaced at your log boundary with `errors.LogValue`
+/ `errors.Attrs`.
 - **[A return trace](#return-trace)** under `%+v`, not a heavyweight stack trace.
 - **[Type marks for control flow](#marks-and-astype)**: `Mark` / `AsType` tag an
 error by type without disturbing its message or `Unwrap` chain.
@@ -111,11 +112,12 @@ hand them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
-Errors also satisfy `slog.LogValuer`, so logging one directly promotes its
-message and attributes:
+Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight to
+a logger does not auto-expand its fields at every layer. Ask for the grouped form
+explicitly with `errors.LogValue`:
 
 ```go
-logger.Error("request failed", slog.Any("err", err))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
 ```
 
 The reasoning behind carrying `slog.Attr` on the error is in
@@ -333,9 +335,10 @@ worth knowing before you adopt it.
   linter only asks you to wrap across *package* boundaries; inside a package, a bare
   `return err` is fine. Treat "escalation distance" as signal only where each frame
   adds information.
-- **Log once, not per layer.** `slog.LogValuer` makes it easy to log an error at
-  every layer, which yields N duplicate lines for one failure. Log at a single
-  top-level handler; lower layers should wrap (for location) and return, not log.
+- **Log once, not per layer.** Errors do not implement `slog.LogValuer`, so they do
+  not auto-expand when logged — log the error once, at a single top-level handler,
+  with `errors.Attrs` / `errors.LogValue`; lower layers wrap (for location) and
+  return, not log.
 - **Do not leak dependencies at boundaries.** `WithCode` keeps the cause matchable;
   use `WithCodeOpaque` when translating a dependency error you do not want callers
   coupling to.

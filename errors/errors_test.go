@@ -88,12 +88,10 @@ func TestFormatVerbs(t *testing.T) {
 	assert(t, countFrames(verbose) > 0, "%+v should include at least one frame")
 }
 
-func TestLogValueCarriesMessageAndAttrs(t *testing.T) {
-	err := errors.New("disk full", slog.String("device", "sda1"))
-
+// renderLog runs emit against a stable text logger (time dropped) and returns the output.
+func renderLog(emit func(*slog.Logger)) string {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
-		// Drop time so the output is stable.
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
 				return slog.Attr{}
@@ -101,11 +99,55 @@ func TestLogValueCarriesMessageAndAttrs(t *testing.T) {
 			return a
 		},
 	}))
-	logger.InfoContext(t.Context(), "operation failed", slog.Any("err", err))
+	emit(logger)
+	return buf.String()
+}
 
-	out := buf.String()
-	assert(t, strings.Contains(out, "disk full"), "log should carry the error message, got: "+out)
-	assert(t, strings.Contains(out, "sda1"), "log should carry the error attr, got: "+out)
+func TestLogValueGroupsMessageAndAttrs(t *testing.T) {
+	err := errors.New("disk full", slog.String("device", "sda1"))
+
+	// The explicit boundary helper returns a group of the message plus chain attrs.
+	v := errors.LogValue(err)
+	equals(t, slog.KindGroup, v.Kind())
+	var gotMsg, gotDevice bool
+	for _, a := range v.Group() {
+		switch a.Key {
+		case "msg":
+			equals(t, "disk full", a.Value.String())
+			gotMsg = true
+		case "device":
+			equals(t, "sda1", a.Value.String())
+			gotDevice = true
+		}
+	}
+	assert(t, gotMsg, "LogValue group should carry the message")
+	assert(t, gotDevice, "LogValue group should carry the attr")
+
+	// Rendered at a boundary, the grouped form carries both.
+	out := renderLog(
+		func(l *slog.Logger) {
+			l.InfoContext(t.Context(), "operation failed", slog.Any("err", errors.LogValue(err)))
+		},
+	)
+	assert(
+		t,
+		strings.Contains(out, "disk full"),
+		"grouped form should carry the message, got: "+out,
+	)
+	assert(t, strings.Contains(out, "sda1"), "grouped form should carry the attr, got: "+out)
+}
+
+// TestErrorDoesNotAutoExpandInSlog pins the deliberate behavior: these errors do not
+// implement slog.LogValuer, so passing one straight to a logger does not expand its
+// attributes — callers use LogValue/Attrs at the boundary instead.
+func TestErrorDoesNotAutoExpandInSlog(t *testing.T) {
+	err := errors.New("disk full", slog.String("device", "sda1"))
+
+	out := renderLog(
+		func(l *slog.Logger) { l.InfoContext(t.Context(), "operation failed", slog.Any("err", err)) },
+	)
+	assert(t, !strings.Contains(out, "sda1"),
+		"a raw error must NOT auto-expand its attrs into the log, got: "+out)
 }
 
 func TestNilInputsReturnNil(t *testing.T) {
