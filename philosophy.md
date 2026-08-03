@@ -448,7 +448,13 @@ Not every error is worth handling:
 - **Some failures are unrecoverable**: a violated invariant, internal
   inconsistency, out of memory. Prefer to `panic` at the point of detection
   rather than threading a check through code that cannot do anything useful with
-  it.
+  it. Because `toerr` is a library, keep this distinction in mind: this applies
+  to application code, which owns the process. Library code should not `panic`
+  across its API for ordinary or expected failures; return an error instead,
+  recovering internally at the package boundary with `errors.Recover` if some
+  dependency panics. Reserve library panics for genuine programmer misuse (as
+  `AsBehavior` does on an invalid type argument) or truly unrecoverable invariant
+  violations.
 - **Some errors can be designed away.** Redefining an operation as "ensure X is
   absent" (which always succeeds) removes a failure mode that "delete X, error if
   missing" would introduce. The best error handling is the error that can no

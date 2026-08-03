@@ -48,13 +48,16 @@ ______________________________________________________________________
       choice belongs to the caller and should be stated.
 - Source: Counterargument 2; remainder of analysis next step #2. Cheapest real win.
 
-## 3. Draw the `panic` app-vs-library line — low-medium impact, very low effort
+## 3. Draw the `panic` app-vs-library line — low-medium impact, very low effort — DONE
 
-- [ ] In "Knowing When to Give Up," state that the `panic`-on-invariant advice is
+- [x] In "Knowing When to Give Up," state that the `panic`-on-invariant advice is
       app-facing, and that library code should not panic across its boundary
       (recover internally). The guidance ships inside a library, so a reader could
       misapply it.
-- Source: Counterargument 6. A one-paragraph doc fix — bundle with item 2.
+- Done: appended to the unrecoverable-failures bullet in `philosophy.md` — library
+  code returns errors (recovering internally with `errors.Recover`), reserving
+  panics for programmer misuse or unrecoverable invariants.
+- Source: Counterargument 6.
 
 ## 4. PC-capture cost story + opt-out — medium impact, medium effort
 
