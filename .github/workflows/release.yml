@@ -1,6 +1,6 @@
 # Release workflow: on a pushed vX.Y.Z tag, goreleaser builds the source tarball,
 # its SBOM (syft), and a checksum, then cosign signs the checksum keylessly and a
-# build-provenance attestation is recorded. skillet is a library, so there are no
+# build-provenance attestation is recorded. this is a library, so there are no
 # binaries or images — only the signed, attested source + SBOM.
 name: release
 
