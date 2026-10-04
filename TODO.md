@@ -63,10 +63,9 @@ ______________________________________________________________________
 
 ## 4. PC-Capture Cost Story + Opt-Out — Medium Impact, Medium Effort
 
-- [ ] Document the per-wrap `runtime.Callers` cost (paid on every `Wrap`, even for
-      swallowed errors). The benchmarks now exist (`errors/bench_test.go`:
-      `BenchmarkNew`, `BenchmarkWrap`, and `BenchmarkFmtErrorf` as the baseline) and
-      `benchgate` gates their allocations in CI; the prose is what is left.
+- [x] Document the per-wrap `runtime.Callers` cost (paid on every `Wrap`, even for
+      swallowed errors). Done: README "What a Frame Costs", backed by
+      `errors/bench_test.go`, with allocations gated by `benchgate` in CI.
 - [ ] Consider a hot-path opt-out or a build-tag / debug-gated PC capture.
 - Source: Gap 5; analysis next step #4 (optional).
 

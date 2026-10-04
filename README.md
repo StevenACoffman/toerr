@@ -277,6 +277,29 @@ When the code is straightforwardly synchronous, the two sides are nearly symmetr
 and the return trace alone suffices. They diverge, and both become worth showing,
 when an error crosses a goroutine or channel boundary.
 
+### What a Frame Costs
+
+A Wrap costs about 135 ns, and roughly 120 ns of that is the `runtime.Callers` call.
+I measured on an Apple M1 Pro, 6 runs each; the numbers barely varied between runs.
+
+| Benchmark                                   | ns/op | B/op | allocs/op | Calls `runtime.Callers`? |
+| ------------------------------------------- | ----: | ---: | --------: | ------------------------ |
+| `Wrap`                                      |   134 |   64 |         1 | yes                      |
+| `WrapWithMessage`                           |   134 |   64 |         1 | yes                      |
+| `New`                                       |   135 |   64 |         1 | yes                      |
+| `Mark` on an error that already has a trace |    14 |   32 |         1 | no                       |
+| `fmt.Errorf("…: %w")`                       |    76 |   48 |         2 | no                       |
+| `runtime.Callers(3, pcs[:1])` alone         |  ~128 |    0 |         0 | (it is the call)         |
+
+These numbers are from Go 1.27.1 on arm64. A copy of the same error struct without the
+frame capture costs 14 ns. The capture itself allocates nothing, so the one allocation
+is the 64-byte error; attributes add a second. Stack depth doesn't change the cost.
+Against `fmt.Errorf`, a 10-hop chain costs about 0.5 µs more to build (1.3 µs against
+0.9 µs), and it uses fewer bytes (640 B against 920 B). It is cheap next to any I/O and
+matters only in hot loops that create and discard errors as normal control flow. Use a
+sentinel there. Reading the trace costs more than building it. On a 10-hop chain, `%+v`
+takes about 4 µs, and `Error()` rebuilds the message on every call, about 0.3 µs each.
+
 ### Context as `slog.Attr`
 
 **The origin has the evidence; the log site has the need. Let them speak the same
