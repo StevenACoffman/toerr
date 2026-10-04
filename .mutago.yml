@@ -1,0 +1,23 @@
+# Mutation testing configuration.
+#
+# Mutation testing answers a question coverage cannot: not "was this line executed?" but
+# "would any test have noticed if it behaved differently?". A surviving mutant marks a line the
+# suite runs without checking.
+#
+# A score is still a metric, and writing tests to satisfy one is its own failure. Read
+# survivors as a prompt — is this behaviour worth pinning, or is the mutant indifferent? —
+# rather than as a list of tests to add. Thresholds, if any, live in the .mise.toml task and
+# the workflow that name the scope, not here.
+#
+# Only the library under errors/ is mutated. mutago runs the root module's tests, which do not
+# include the property tests in proptest/ (a module of its own), so a mutant only those
+# properties would kill shows up here as a survivor.
+exclude_dirs:
+# The runnable example module. It demonstrates the API; it does not test it.
+- _examples
+# The property-test module; mutating test code says nothing.
+- proptest
+# The release helper, which the suite does not exercise at all.
+- bin
+ignore_source_lines:
+- "// Code generated"
