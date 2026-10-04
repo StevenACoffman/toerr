@@ -112,6 +112,11 @@ hand them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
+`Attrs` walks the whole tree, including every branch of an `errors.Join`. An error
+type declared outside this package contributes its own fields by implementing
+`Attrs() []slog.Attr`, the method counterpart of the function, as `Unwrap` is to
+`errors.Unwrap`. That way the fields are not copied into a `Wrap`.
+
 Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight to
 a logger does not auto-expand its fields at every layer. Ask for the grouped form
 explicitly with `errors.LogValue`:

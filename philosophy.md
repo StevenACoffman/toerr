@@ -441,6 +441,11 @@ them to `LogAttrs`:
 logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
 ```
 
+`Attrs` descends into every branch of an `errors.Join`. Any error type, including
+one declared outside this package, contributes its fields by implementing
+`Attrs() []slog.Attr`. Fields it already holds then reach the log without being
+copied into a `Wrap`.
+
 Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight
 to a logger does not silently expand its fields at every layer (which invites
 duplicate log lines). When you want the error as a single grouped attribute, ask for

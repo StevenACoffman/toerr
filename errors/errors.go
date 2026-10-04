@@ -16,6 +16,8 @@ var (
 	_ fmt.Formatter                  = (*annotatedError)(nil)
 	_ interface{ TracePC() uintptr } = (*annotatedError)(nil)
 
+	_ interface{ Attrs() []slog.Attr } = (*annotatedError)(nil)
+
 	_ error                          = (*marked)(nil)
 	_ fmt.Formatter                  = (*marked)(nil)
 	_ interface{ TracePC() uintptr } = (*marked)(nil)
@@ -96,15 +98,44 @@ func AsType[T error](err error) (T, bool) {
 	return stderrors.AsType[T](err)
 }
 
-// Attrs collects every slog attribute attached along the chain, outermost first.
+// Attrs collects every slog attribute attached along err's tree, outermost
+// first, descending into every branch of a multi-error (errors.Join) in order.
+//
+// Any error contributes by implementing
+//
+//	Attrs() []slog.Attr
+//
+// the method counterpart to this function, as Unwrap, Is, and As are to theirs.
+// The errors this package creates implement it; an error type declared elsewhere
+// can too, surfacing its own fields without being wrapped to copy them.
 func Attrs(err error) []slog.Attr {
 	var attrs []slog.Attr
-	for e := err; e != nil; e = stderrors.Unwrap(e) {
-		if a, ok := e.(interface{ attributes() []slog.Attr }); ok {
-			attrs = append(attrs, a.attributes()...)
+	walkTree(err, func(e error) {
+		if a, ok := e.(interface{ Attrs() []slog.Attr }); ok {
+			attrs = append(attrs, a.Attrs()...)
+		}
+	})
+	return attrs
+}
+
+// walkTree calls visit on err and every error beneath it, depth-first and
+// pre-order, following both the single (Unwrap() error) and multi (Unwrap()
+// []error) shapes.
+func walkTree(err error, visit func(error)) {
+	for err != nil {
+		visit(err)
+		switch x := err.(type) { //nolint:errorlint // deliberate single-node inspection.
+		case interface{ Unwrap() error }:
+			err = x.Unwrap()
+		case interface{ Unwrap() []error }:
+			for _, e := range x.Unwrap() {
+				walkTree(e, visit)
+			}
+			return
+		default:
+			return
 		}
 	}
-	return attrs
 }
 
 // Is reports whether any error in err's chain matches target (see errors.Is).
@@ -139,7 +170,9 @@ func (e *annotatedError) TracePC() uintptr { return e.pc }
 
 func (e *annotatedError) Format(s fmt.State, verb rune) { formatError(e, s, verb) }
 
-func (e *annotatedError) attributes() []slog.Attr { return e.attrs }
+// Attrs returns the slog attributes recorded at this error's call site; the
+// package-level Attrs collects them along the whole chain.
+func (e *annotatedError) Attrs() []slog.Attr { return e.attrs }
 
 func (m *marked) Error() string { return m.cause.Error() }
 

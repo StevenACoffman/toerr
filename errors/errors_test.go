@@ -22,6 +22,10 @@ type fakeTraceError struct {
 
 type notFoundError struct{ msg string }
 
+// sqlFieldError stands in for an error type declared outside this package, such as
+// a dependency's, that exposes its own fields through the Attrs method.
+type sqlFieldError struct{ column string }
+
 func (e *fakeTraceError) Error() string    { return e.err.Error() }
 func (e *fakeTraceError) Unwrap() error    { return e.err }
 func (e *fakeTraceError) TracePC() uintptr { return e.pc }
@@ -220,6 +224,10 @@ func TestMarkIsTransparent(t *testing.T) {
 		"%+v should include a trace mentioning errors_test.go, got: "+trace)
 }
 
+func (e *sqlFieldError) Error() string { return "bad column " + e.column }
+
+func (e *sqlFieldError) Attrs() []slog.Attr { return []slog.Attr{slog.String("column", e.column)} }
+
 func TestMarkWithSentinelMatchesIs(t *testing.T) {
 	errRateLimited := stderrors.New("rate limited")
 	external := stderrors.New("upstream 429")
@@ -242,6 +250,30 @@ func TestMarkWithSentinelMatchesIs(t *testing.T) {
 
 	// A mark survives further wrapping.
 	assert(t, errors.Is(errors.Wrap(marked), errRateLimited), "Is should see through Wrap")
+}
+
+func TestAttrsIncludesForeignAttrsMethod(t *testing.T) {
+	err := errors.Wrap(&sqlFieldError{column: "email"}, slog.String("op", "insert"))
+
+	attrs := errors.Attrs(err)
+	equals(t, 2, len(attrs))
+	equals(t, "op", attrs[0].Key)
+	equals(t, "column", attrs[1].Key)
+	equals(t, "email", attrs[1].Value.String())
+}
+
+func TestAttrsDescendsIntoJoin(t *testing.T) {
+	joined := errors.Join(
+		errors.New("first", slog.Int("a", 1)),
+		errors.Wrap(errors.New("second", slog.Int("c", 3)), slog.Int("b", 2)),
+	)
+	attrs := errors.Attrs(errors.Wrap(joined, slog.Int("outer", 0)))
+
+	var keys []string
+	for _, a := range attrs {
+		keys = append(keys, a.Key)
+	}
+	equals(t, "outer,a,b,c", strings.Join(keys, ","))
 }
 
 // countFrames returns the number of file:line lines in a %+v trace. Each frame
