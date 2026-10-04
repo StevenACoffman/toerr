@@ -1,0 +1,45 @@
+# To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+# Maintain dependencies for GitHub Actions
+- package-ecosystem: "github-actions"
+  groups:
+    actions-deps:
+      patterns:
+      - "*"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+  # Hold a new release back for a week before proposing it, so a compromised or broken
+  # version has time to be noticed and yanked before it lands here.
+  cooldown:
+    default-days: 7
+# Maintain dependencies for Go Modules
+- package-ecosystem: "gomod" # See documentation for possible values
+  directory: "/" # Location of package manifests
+  groups:
+    go-deps:
+      patterns:
+      - "*"
+  schedule:
+    interval: "weekly"
+  # Hold a new release back for a week before proposing it, so a compromised or broken
+  # version has time to be noticed and yanked before it lands here.
+  cooldown:
+    default-days: 7
+# The property-test module has its own go.mod (rapid lives only there).
+- package-ecosystem: "gomod"
+  directory: "/proptest"
+  groups:
+    proptest-deps:
+      patterns:
+      - "*"
+  schedule:
+    interval: "weekly"
+  # Hold a new release back for a week before proposing it, so a compromised or broken
+  # version has time to be noticed and yanked before it lands here.
+  cooldown:
+    default-days: 7
