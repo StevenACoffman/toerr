@@ -161,6 +161,11 @@ if _, ok := errors.AsType[*RateLimitError](err); ok { // matches anywhere up the
 }
 ```
 
+A sentinel works as a marker too: `errors.Mark(err, ErrQuota)` makes
+`errors.Is(err, ErrQuota)` true, still without putting `ErrQuota` in the chain.
+`Mark` is for errors whose type you do not own. When you construct the type
+yourself, give it an `Unwrap` or `Is` method that returns your sentinel instead.
+
 Prefer a custom type or a mark when callers must *branch on a category*; prefer a
 sentinel when they match a single well-known value.
 

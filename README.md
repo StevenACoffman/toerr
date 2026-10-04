@@ -185,7 +185,12 @@ error with a marker whose type
 recognizes. [`Mark`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Mark)
 does this without changing the error's message or `Unwrap` chain. A foreign
 error is wrapped first, so it still carries a trace. `AsType` is a re-export of the
-Go 1.26 `errors.AsType`, so it returns the found value and a boolean.
+Go 1.26 `errors.AsType`, so it returns the found value and a boolean. A sentinel
+works as a marker too: `errors.Is(errors.Mark(err, ErrQuota), ErrQuota)` is true.
+
+`Mark` exists for errors whose type you do not control. If you construct the error
+type yourself, give it an `Unwrap` or `Is` method that returns your sentinel instead.
+That keeps identity matching inside the type and needs no extra wrapper.
 
 ```go
 type NotFoundError struct{ error }

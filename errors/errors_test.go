@@ -220,6 +220,30 @@ func TestMarkIsTransparent(t *testing.T) {
 		"%+v should include a trace mentioning errors_test.go, got: "+trace)
 }
 
+func TestMarkWithSentinelMatchesIs(t *testing.T) {
+	errRateLimited := stderrors.New("rate limited")
+	external := stderrors.New("upstream 429")
+	marked := errors.Mark(external, errRateLimited)
+
+	assert(t, errors.Is(marked, errRateLimited), "Is(marked, sentinel marker) should be true")
+	assert(t, errors.Is(marked, external), "Is(marked, cause) should still be true")
+	assert(t, !errors.Is(marked, stderrors.New("rate limited")),
+		"Is must match the marker by identity, not by message")
+
+	// The marker stays out of the message and the Unwrap chain.
+	equals(t, "upstream 429", marked.Error())
+	for e := marked; e != nil; e = errors.Unwrap(e) {
+		assert(
+			t,
+			e != errRateLimited, //nolint:errorlint // identity of each chain node, not a match.
+			"the marker must not appear in the Unwrap chain",
+		)
+	}
+
+	// A mark survives further wrapping.
+	assert(t, errors.Is(errors.Wrap(marked), errRateLimited), "Is should see through Wrap")
+}
+
 // countFrames returns the number of file:line lines in a %+v trace. Each frame
 // renders a "<file>.go:<line>" line, so ".go:" occurs exactly once per frame.
 // Matching that, rather than a leading "/", counts frames whether the path is

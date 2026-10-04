@@ -31,12 +31,11 @@ type annotatedError struct {
 	attrs []slog.Attr
 }
 
-// marked tags an error with a marker whose type AsType can recognize, without
+// marked tags an error with a marker that Is and AsType can recognize, without
 // placing the marker in the Unwrap chain (so it stays transparent).
 type marked struct {
 	cause  error
 	marker error
-	attrs  []slog.Attr
 }
 
 // traceTree represents an error and its return trace as a tree. Children are the
@@ -69,7 +68,15 @@ func WrapWithMessage(err error, message string, attrs ...slog.Attr) error {
 	return &annotatedError{msg: message, cause: err, pc: callerPC(), attrs: attrs}
 }
 
-// Mark tags err with marker so AsType[T](err) is true for marker's type T.
+// Mark tags err with marker so that Is(err, marker) is true and AsType[T](err)
+// is true for marker's type T. The marker joins neither the message nor the
+// Unwrap chain: Unwrap still reaches err, so the mark is transparent.
+//
+// Mark is for errors whose type you do not control — a dependency's sentinel or
+// an untyped error — and either kind of marker works: a sentinel for identity
+// (Is), or a typed value for category and fields (AsType, AsBehavior). An error
+// type you own does not need it; give the type an Unwrap or Is method instead.
+//
 // If err was not produced by this package, it is Wrapped first so it still
 // carries a trace frame.
 func Mark(err error, marker error) error {
@@ -145,10 +152,11 @@ func (m *marked) TracePC() uintptr { return 0 }
 
 func (m *marked) Format(s fmt.State, verb rune) { formatError(m, s, verb) }
 
+// Is reports the marker's identity to errors.Is, so a sentinel marker matches.
+func (m *marked) Is(target error) bool { return Is(m.marker, target) }
+
 // As reports the marker's type to errors.As, so AsType matches it.
 func (m *marked) As(target any) bool { return As(m.marker, target) }
-
-func (m *marked) attributes() []slog.Attr { return m.attrs }
 
 // hasTrace reports whether the chain already carries a trace frame — from this
 // package or from errtrace (both use the TracePC marker).
