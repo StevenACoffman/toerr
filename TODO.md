@@ -137,7 +137,7 @@ apart from benchmarks). Its coded leaves are `errcode.WithCode(code, msg, nil)`,
 its coded wraps are `WithCode(code, "", WrapWithMessage(err, op))`. Four library
 issues surfaced, in priority order.
 
-- [ ] **`errcode.WithCode` and `WithCodeOpaque` record no frame — High Impact, Low
+- [x] **`errcode.WithCode` and `WithCodeOpaque` record no frame — High Impact, Low
       Effort.** `New` and `Wrap` call `callerPC()`, but nothing in `errcode` does, so
       a coded leaf is missing from the `%+v` return trace. A probe printed the wrapper's
       frame and no origin for `WrapWithMessage(WithCode(StatusNotFound, "…", nil), …)`,
@@ -147,8 +147,16 @@ issues surfaced, in priority order.
       on `withCodeError`; add a test that a coded leaf contributes one frame. This is
       also the precondition for any adopter dropping manual `Op` strings as
       `philosophy.md` recommends: gnosis cannot, because most of its leaves are coded
-      and would vanish from the trace.
-- [ ] **Make leaf and wrap constructors agree about nil — Medium Impact, Low Effort
+      and would vanish from the trace. Done: the PC capture and trace renderer moved
+      to `errors/internal/trace`, shared by both packages, so the format stays one
+      decision and no API was added; `withCodeError` records a PC and implements
+      `TracePC`, and its `%+v` is now the same return trace as the root package's.
+      That also fixed an unrecorded defect: `%+v` of a coded leaf printed `<nil>`
+      then `(message)`. `TestACodedErrorContributesItsCallSite` pins one frame per
+      coded hop at the caller's line. Cost: `WithCode` went from 12 ns to 133 ns,
+      the same `runtime.Callers` price as `Wrap`; README's "What a Frame Costs" table
+      lists the `errcode` rows.
+- [x] **Make leaf and wrap constructors agree about nil — Medium Impact, Low Effort
       (plus a deprecation window).** `WrapWithMessage(nil, …)` returns nil, but
       `WithCode(code, msg, nil)` returns a real error, because `WithCode` doubles as the
       only coded-leaf constructor. The mismatch caused a silent bug: gnosis's first,
@@ -158,6 +166,16 @@ issues surfaced, in priority order.
       `WithCode` as a wrap. After a deprecation window, make `WithCode` return nil for
       a nil cause, as `Wrap` does. Adopters have many `WithCode(…, nil)` leaves (gnosis
       has 34 or more), so the semantics change needs the window and a changelog entry.
+      Done, first half: `errcode.New(code, message)` is the coded leaf and records a
+      frame; `WithCode` and `WithCodeOpaque` are documented as wraps, and their godoc
+      deprecates a nil cause and warns what the flip will do. The `errhttp` example,
+      test and README now use `New`. The flip is the next item.
+- [ ] **Make `WithCode` and `WithCodeOpaque` nil-in nil-out — after the deprecation
+      window.** Return nil for a nil cause, as `errors.Wrap` does. Before releasing it:
+      confirm adopters have replaced their nil-cause leaves with `errcode.New` (gnosis
+      is the known one), delete the `deprecated leaf` cases in `code_test.go` and
+      replace them with a nil-in nil-out case, and say in the release notes that an
+      unmigrated leaf would report success on its failure path.
 - [ ] **Decide what `errcode.Message` returns for classify-only wraps — Medium Impact,
       Low Effort.** `Message` reads only the *outermost* coded error. Attaching a code
       to an existing error is naturally written `WithCode(code, "", err)`, and that

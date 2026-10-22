@@ -13,6 +13,12 @@ var (
 	benchMsg  string
 )
 
+func BenchmarkNew(b *testing.B) {
+	for b.Loop() {
+		errSink = errcode.New(errcode.StatusNotFound, "not found")
+	}
+}
+
 func BenchmarkWithCode(b *testing.B) {
 	cause := errors.New("boom")
 	for b.Loop() {

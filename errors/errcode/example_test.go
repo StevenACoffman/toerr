@@ -7,6 +7,20 @@ import (
 	"github.com/StevenACoffman/toerr/errors/errcode"
 )
 
+// New is the coded leaf: the failure is understood here, so it gets a code and the
+// message an end user may see, and no cause.
+func ExampleNew() {
+	err := errcode.New(errcode.StatusNotFound, "user not found")
+
+	fmt.Println(err)                  // operator view: the message
+	fmt.Println(errcode.Status(err))  // application view: the code
+	fmt.Println(errcode.Message(err)) // end-user view: safe message
+	// Output:
+	// user not found
+	// not_found
+	// user not found
+}
+
 // A single WithCode call carries a code, a user-facing message, and a cause
 // together, and each consumer reads the view it needs.
 func ExampleWithCode() {

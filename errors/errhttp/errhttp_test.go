@@ -45,7 +45,7 @@ func TestStatusMessageDefaultsText(t *testing.T) {
 }
 
 func TestErrorMapsAttachedCode(t *testing.T) {
-	err := errcode.WithCode(errcode.StatusPermissionDenied, "nope", nil)
+	err := errcode.New(errcode.StatusPermissionDenied, "nope")
 	status, msg := errhttp.Error(err)
 	if status != http.StatusForbidden {
 		t.Errorf("status = %d, want %d", status, http.StatusForbidden)

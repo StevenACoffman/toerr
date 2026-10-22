@@ -39,8 +39,8 @@ func handle(w http.ResponseWriter, err error) {
 }
 
 func main() {
-	handle(nil, errcode.WithCode(errcode.StatusPermissionDenied, "you cannot edit this", nil))
-	handle(nil, errcode.WithCode(errcode.StatusNotFound, "", nil)) // no message → default text
+	handle(nil, errcode.New(errcode.StatusPermissionDenied, "you cannot edit this"))
+	handle(nil, errcode.New(errcode.StatusNotFound, "")) // no message → default text
 }
 ```
 

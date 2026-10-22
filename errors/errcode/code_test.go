@@ -2,8 +2,11 @@ package errcode_test
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errcode"
 )
 
@@ -43,12 +46,18 @@ func TestErrorMessage(t *testing.T) {
 			errcode.WithCode(errcode.StatusInternal, "boom", errors.New("root")),
 			"root (boom)",
 		},
-		"message only": {errcode.WithCode(errcode.StatusInternal, "boom", nil), "boom"},
+		"leaf": {errcode.New(errcode.StatusInternal, "boom"), "boom"},
+		"leaf without message": {
+			errcode.New(errcode.StatusNotFound, ""),
+			"error: not_found",
+		},
 		"cause only": {
 			errcode.WithCode(errcode.StatusInternal, "", errors.New("root")),
 			"root",
 		},
-		"neither": {
+		// The deprecated leaf spelling, pinned until WithCode becomes nil-in nil-out.
+		"deprecated leaf": {errcode.WithCode(errcode.StatusInternal, "boom", nil), "boom"},
+		"deprecated leaf without message": {
 			errcode.WithCode(errcode.StatusNotFound, "", nil),
 			"error: not_found",
 		},
@@ -68,12 +77,10 @@ func TestMessage(t *testing.T) {
 		want string
 	}{
 		"with message": {
-			errcode.WithCode(errcode.StatusNotFound, "user not found", nil),
+			errcode.New(errcode.StatusNotFound, "user not found"),
 			"user not found",
 		},
 		"empty message": {errcode.WithCode(errcode.StatusInternal, "", errors.New("boom")), ""},
-		"no code":       {errors.New("plain"), ""},
-		"nil":           {nil, ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -119,5 +126,48 @@ func TestStatusCodeString(t *testing.T) {
 	}
 	if errcode.StatusCode(999).String() != "unknown" {
 		t.Errorf("unknown code String() = %q, want %q", errcode.StatusCode(999).String(), "unknown")
+	}
+}
+
+// A coded error is a hop like any other, so it must appear in the %+v return trace,
+// at its caller's line rather than inside this package. A coded leaf is the hop a
+// reader most needs: it is where the failure was understood.
+func TestACodedErrorContributesItsCallSite(t *testing.T) {
+	cases := map[string]struct {
+		err    error
+		frames int
+	}{
+		"leaf": {errcode.New(errcode.StatusNotFound, "no such user"), 1},
+		"deprecated leaf": {
+			errcode.WithCode(errcode.StatusNotFound, "no such user", nil),
+			1,
+		},
+		"leaf under a wrap": {
+			toerr.WrapWithMessage(errcode.New(errcode.StatusNotFound, "no such user"), "svc.Get"),
+			2,
+		},
+		"coded wrap": {
+			errcode.WithCode(errcode.StatusInternal, "", toerr.New("disk full")),
+			2,
+		},
+		// Severing flattens the cause to text, frames included; the boundary keeps one.
+		"opaque": {
+			errcode.WithCodeOpaque(errcode.StatusInternal, "", toerr.New("disk full")),
+			1,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := fmt.Sprintf("%+v", tc.err)
+			if n := strings.Count(got, "code_test.go:"); n != tc.frames {
+				t.Errorf("%d frames at the call site, want %d:\n%s", n, tc.frames, got)
+			}
+			if strings.Contains(got, "errcode/code.go") {
+				t.Errorf("a frame points inside errcode:\n%s", got)
+			}
+			if !strings.HasPrefix(got, tc.err.Error()+"\n") {
+				t.Errorf("%%+v does not lead with the message %q:\n%s", tc.err.Error(), got)
+			}
+		})
 	}
 }

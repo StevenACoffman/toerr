@@ -287,15 +287,19 @@ I measured on an Apple M1 Pro, 6 runs each; the numbers barely varied between ru
 | `Wrap`                                      |   134 |   64 |         1 | yes                      |
 | `WrapWithMessage`                           |   134 |   64 |         1 | yes                      |
 | `New`                                       |   135 |   64 |         1 | yes                      |
+| `errcode.New`                               |   136 |   48 |         1 | yes                      |
+| `errcode.WithCode`                          |   133 |   48 |         1 | yes                      |
+| `errcode.WithCodeOpaque`                    |   168 |   64 |         2 | yes                      |
 | `Mark` on an error that already has a trace |    14 |   32 |         1 | no                       |
 | `fmt.Errorf("…: %w")`                       |    76 |   48 |         2 | no                       |
 | `runtime.Callers(3, pcs[:1])` alone         |  ~128 |    0 |         0 | (it is the call)         |
 
-These numbers are from Go 1.27.1 on arm64. A copy of the same error struct without the
-frame capture costs 14 ns. The capture itself allocates nothing, so the one allocation
-is the 64-byte error; attributes add a second. Stack depth doesn't change the cost.
-Against `fmt.Errorf`, a 10-hop chain costs about 0.5 µs more to build (1.3 µs against
-0.9 µs), and it uses fewer bytes (640 B against 920 B). It is cheap next to any I/O and
+These numbers are from Go 1.27.1 on arm64, and the `errcode` rows from Go 1.27.2. A
+copy of the same error struct without the frame capture costs 14 ns. The capture
+itself allocates nothing, so the one allocation is the 64-byte error (48 bytes for a
+coded one); attributes add a second. Stack depth doesn't change the cost. Against
+`fmt.Errorf`, a 10-hop chain costs about 0.5 µs more to build (1.3 µs against 0.9 µs),
+and it uses fewer bytes (640 B against 920 B). It is cheap next to any I/O and
 matters only in hot loops that create and discard errors as normal control flow. Use a
 sentinel there. Reading the trace costs more than building it. On a 10-hop chain, `%+v`
 takes about 4 µs, and `Error()` rebuilds the message on every call, about 0.3 µs each.
@@ -399,13 +403,13 @@ synchronous, you may not need it.
 
 ## Subpackages
 
-| Package    | Purpose                                                                   |
-| ---------- | ------------------------------------------------------------------------- |
-| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.               |
-| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Message`).    |
-| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
-| `errclass` | Coarse severity classification that folds across joined errors.           |
+| Package    | Purpose                                                                      |
+| ---------- | ---------------------------------------------------------------------------- |
+| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`.    |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                  |
+| `errcode`  | Transport-neutral status codes (`New`/`WithCode`/`Code`/`Status`/`Message`). |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.            |
+| `errclass` | Coarse severity classification that folds across joined errors.              |
 
 Each subpackage has its own README:
 
