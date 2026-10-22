@@ -176,7 +176,7 @@ issues surfaced, in priority order.
       is the known one), delete the `deprecated leaf` cases in `code_test.go` and
       replace them with a nil-in nil-out case, and say in the release notes that an
       unmigrated leaf would report success on its failure path.
-- [ ] **Decide what `errcode.Message` returns for classify-only wraps — Medium Impact,
+- [x] **Decide what `errcode.Message` returns for classify-only wraps — Medium Impact,
       Low Effort.** `Message` reads only the *outermost* coded error. Attaching a code
       to an existing error is naturally written `WithCode(code, "", err)`, and that
       hides any inner coded message: `Message` returns `""`. Either return the first
@@ -184,6 +184,15 @@ issues surfaced, in priority order.
       classify-only wrap masks inner messages, with the preferred spelling for adding a
       code without a message. If a dedicated classify constructor is added (for example
       `errcode.Classify(err, code)`, nil-in nil-out), state its `Message` behaviour too.
+      Done: `Message` returns the outermost *non-empty* message, so a coded wrap
+      without one only reclassifies and an outer message still overrides; `Status`
+      stays outermost-wins, and `Code` returns the two together (it used to return
+      the outermost node's possibly empty message). No `Classify` was added: with
+      `Message` fixed, `WithCode(code, "", err)` is already the safe spelling, and a
+      third constructor would only widen the API. `WithCodeOpaque` still severs the
+      message beneath it, pinned by a test. Table cases in `code_test.go` and the
+      `TestCodedChainReportsOutermostCodeAndMessage` property cover it; `Code` still
+      costs one chain walk (45 ns).
 - [ ] **Document migrating *from* `Op` strings — Low-Medium Impact, Low Effort.**
       `philosophy.md` says "No `Op` strings" and offers `WrapWithMessage(err, op)` for
       keeping the one-line form, but says nothing about the two ways that form breaks

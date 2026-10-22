@@ -27,10 +27,13 @@ never exposes the wrapped internal detail that `err.Error()` would.
   dependency cannot break a caller who matched on, say, `sql.ErrNoRows`.
 - Every constructor records its call site, so a coded error appears in the
   `%+v` return trace like any other hop.
-- `errcode.Code(err) (StatusCode, string)` / `errcode.Status(err) StatusCode`:
-  read the code back, or `StatusUnknown` if none.
-- `errcode.Message(err) string`: the user-facing message, or `""`. Show this to
-  clients; never fall back to `err.Error()`.
+- `errcode.Status(err) StatusCode`: the outermost code, or `StatusUnknown` if none.
+  A wrap can reclassify for its own callers.
+- `errcode.Message(err) string`: the outermost non-empty user-facing message, or
+  `""`. A coded wrap without a message, `WithCode(code, "", err)`, only
+  reclassifies, so it does not hide the message beneath it. Show this to clients;
+  never fall back to `err.Error()`.
+- `errcode.Code(err) (StatusCode, string)`: `Status` and `Message` together.
 - Codes: `StatusInvalidArgument`, `StatusNotFound`, `StatusUnauthenticated`,
   `StatusPermissionDenied`, `StatusAlreadyExists`, `StatusInternal`, and more.
 

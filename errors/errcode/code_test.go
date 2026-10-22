@@ -29,6 +29,25 @@ func TestCodeRoundTrip(t *testing.T) {
 	}
 }
 
+// Code answers what Status and Message answer: the outermost code, which a wrap may
+// change, and the outermost message, which a wrap without one leaves alone.
+func TestCodeAgreesWithStatusAndMessage(t *testing.T) {
+	err := errcode.WithCode(
+		errcode.StatusInvalidArgument,
+		"",
+		errcode.New(errcode.StatusNotFound, "no such user"),
+	)
+
+	code, msg := errcode.Code(err)
+	if code != errcode.StatusInvalidArgument || msg != "no such user" {
+		t.Errorf("Code = (%v, %q), want (invalid_argument, %q)", code, msg, "no such user")
+	}
+	if code != errcode.Status(err) || msg != errcode.Message(err) {
+		t.Errorf("Code = (%v, %q), Status/Message = (%v, %q)",
+			code, msg, errcode.Status(err), errcode.Message(err))
+	}
+}
+
 func TestCodeMissing(t *testing.T) {
 	// A plain error carries no code.
 	code, msg := errcode.Code(errors.New("plain"))
@@ -81,6 +100,45 @@ func TestMessage(t *testing.T) {
 			"user not found",
 		},
 		"empty message": {errcode.WithCode(errcode.StatusInternal, "", errors.New("boom")), ""},
+		// A coded wrap without a message only reclassifies; the message beneath shows.
+		"classify-only wrap": {
+			errcode.WithCode(
+				errcode.StatusInvalidArgument,
+				"",
+				errcode.New(errcode.StatusNotFound, "no such user"),
+			),
+			"no such user",
+		},
+		"classify-only wrap under a plain wrap": {
+			toerr.WrapWithMessage(
+				errcode.WithCode(
+					errcode.StatusInvalidArgument,
+					"",
+					errcode.New(errcode.StatusNotFound, "no such user"),
+				),
+				"svc.Get",
+			),
+			"no such user",
+		},
+		"outer message wins": {
+			errcode.WithCode(
+				errcode.StatusInternal,
+				"try again later",
+				errcode.New(errcode.StatusNotFound, "no such user"),
+			),
+			"try again later",
+		},
+		// Severing flattens the cause to text, so its message goes with its identity.
+		"opaque severs the message beneath": {
+			errcode.WithCodeOpaque(
+				errcode.StatusInternal,
+				"",
+				errcode.New(errcode.StatusNotFound, "no such user"),
+			),
+			"",
+		},
+		"no code": {errors.New("plain"), ""},
+		"nil":     {nil, ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

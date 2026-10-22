@@ -1,6 +1,7 @@
 package proptest_test
 
 import (
+	"cmp"
 	stderrors "errors"
 	"net/http"
 	"strings"
@@ -111,6 +112,53 @@ func TestHTTPErrorNeverExposesTheCause(t *testing.T) {
 		}
 		if got != want {
 			t.Fatalf("message %q, want %q (cause was %q)", got, want, secret)
+		}
+	})
+}
+
+// TestCodedChainReportsOutermostCodeAndMessage checks how Status and Message read any chain
+// of plain wraps, coded leaves and coded wraps. The code is the outermost one, because a wrap
+// reclassifies for its own callers. The message is the outermost non-empty one, because a
+// coded wrap without a message only reclassifies and must not hide the text an end user would
+// otherwise see.
+func TestCodedChainReportsOutermostCodeAndMessage(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		messages := []string{"", "Not found.", "Try again later."}
+		wantCode, wantMessage := errcode.StatusUnknown, ""
+		err := stderrors.New("root")
+		if rapid.Bool().Draw(t, "coded leaf") {
+			wantCode = rapid.SampledFrom(codes).Draw(t, "leaf code")
+			wantMessage = rapid.SampledFrom(messages).Draw(t, "leaf message")
+			err = errcode.New(wantCode, wantMessage)
+		}
+
+		// Layers apply inside out, so the last coded layer is the outermost.
+		for range rapid.IntRange(0, 6).Draw(t, "layers") {
+			switch rapid.IntRange(0, 2).Draw(t, "layer") {
+			case 0:
+				err = errors.Wrap(err)
+			case 1:
+				err = errors.WrapWithMessage(err, "op")
+			default:
+				code := rapid.SampledFrom(codes).Draw(t, "code")
+				message := rapid.SampledFrom(messages).Draw(t, "message")
+				err = errcode.WithCode(code, message, err)
+				wantCode = code
+				wantMessage = cmp.Or(message, wantMessage)
+			}
+		}
+
+		if got := errcode.Status(err); got != wantCode {
+			t.Fatalf("Status = %v, want %v in %q", got, wantCode, err)
+		}
+		if got := errcode.Message(err); got != wantMessage {
+			t.Fatalf("Message = %q, want %q in %q", got, wantMessage, err)
+		}
+		if gotCode, gotMessage := errcode.Code(
+			err,
+		); gotCode != wantCode ||
+			gotMessage != wantMessage {
+			t.Fatalf("Code = (%v, %q), want (%v, %q)", gotCode, gotMessage, wantCode, wantMessage)
 		}
 	})
 }

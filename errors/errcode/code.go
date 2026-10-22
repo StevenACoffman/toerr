@@ -135,16 +135,17 @@ func WithCodeOpaque(code StatusCode, message string, cause error) error {
 	return e
 }
 
-// Code returns the status code and message attached to err, or StatusUnknown.
+// Code returns [Status] and [Message] together.
 func Code(err error) (StatusCode, string) {
 	var wc *withCodeError
 	if !errors.As(err, &wc) {
 		return StatusUnknown, ""
 	}
-	return wc.code, wc.message
+	return wc.code, wc.userMessage()
 }
 
-// Status returns the status code attached to err, or StatusUnknown.
+// Status returns the outermost status code in err's chain, or StatusUnknown. The
+// outermost wins so that a wrap can reclassify a failure for its own callers.
 func Status(err error) StatusCode {
 	var wc *withCodeError
 	if !errors.As(err, &wc) {
@@ -158,14 +159,18 @@ func Status(err error) StatusCode {
 // It is the safe, end-user view of an error: unlike err.Error(), it never
 // exposes wrapped internal detail, so it is what you show to an end user or a
 // client. When it returns "", supply your own generic message (for example with
-// cmp.Or) — never fall back to err.Error(). It reads the outermost coded error
-// in the chain.
+// cmp.Or) — never fall back to err.Error().
+//
+// It reads the outermost coded error that has a message. A coded wrap without one,
+// such as WithCode(code, "", err), only reclassifies, so it leaves the message
+// beneath it visible; an outer message still replaces an inner one. WithCodeOpaque
+// severs its cause, and with it any message the cause carried.
 func Message(err error) string {
 	var wc *withCodeError
 	if !errors.As(err, &wc) {
 		return ""
 	}
-	return wc.message
+	return wc.userMessage()
 }
 
 func (e *withCodeError) Unwrap() error {
@@ -204,4 +209,18 @@ func (e *withCodeError) Format(s fmt.State, verb rune) {
 	case 'q':
 		_, _ = fmt.Fprintf(s, "%q", e.Error())
 	}
+}
+
+// userMessage returns the first non-empty message from e down its chain. Code and
+// Message start it from the outermost coded error they already found, so the usual
+// case, a message on that error, costs no second search.
+func (e *withCodeError) userMessage() string {
+	for e.message == "" {
+		var inner *withCodeError
+		if !errors.As(e.cause, &inner) {
+			return ""
+		}
+		e = inner
+	}
+	return e.message
 }
