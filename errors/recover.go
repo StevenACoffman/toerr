@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+
+	"github.com/StevenACoffman/toerr/errors/internal/trace"
 )
 
 // Recover converts the result of the builtin recover() into an error, or nil if
@@ -28,7 +30,7 @@ func Recover(recovered any) error {
 		return nil
 	}
 	e := &annotatedError{
-		pc:    callerPC(),
+		pc:    trace.CallerPC(),
 		attrs: []slog.Attr{slog.String("stack", string(debug.Stack()))},
 	}
 	switch v := recovered.(type) {
