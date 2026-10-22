@@ -384,7 +384,8 @@ they escape" means in practice: after `WithCodeOpaque`, `errors.Is(err, sql.ErrN
 is false, so switching storage engines cannot break a caller. Reach for
 `WithCodeOpaque` when hiding a dependency (the not-found path above); reach for
 `WithCode` when the cause is your own or the operator needs its trace (the
-`StatusInternal` path).
+`StatusInternal` path). Where the failure starts in your own code, with no cause to
+carry, `errcode.New(code, message)` is the coded leaf.
 
 At the edge of the program, read the code back and map it to the transport,
 without knowing anything about the concrete error type:
@@ -420,6 +421,39 @@ The one rule that ties them together is a security boundary: **never show
 expose wrapped internal detail (a database error revealing schema, a file path).
 Messages from `New`/`WrapWithMessage` are operator-facing; only an `errcode`
 message is vetted for users.
+
+### Coming from `Error{Code, Message, Op, Err}`
+
+Many Go codebases use Ben Johnson's single error struct, filled one way for a leaf
+and another for a wrap. Each shape has a direct spelling here:
+
+| `Error` literal        | toerr spelling                                                |
+| ---------------------- | ------------------------------------------------------------- |
+| `{Code, Message}`      | `errcode.New(code, message)`                                  |
+| `{Op, Err}`            | `errors.WrapWithMessage(err, op)`, or `errors.Wrap(err)`      |
+| `{Code, Op, Err}`      | `errcode.WithCode(code, "", errors.WrapWithMessage(err, op))` |
+| `{Code, Message, Err}` | `errcode.WithCode(code, message, err)`                        |
+
+The `{Op, Err}` row renders `op: cause`, exactly as the struct did, and records a
+frame besides; once every leaf and wrap records one, `%+v` already shows the path,
+and `errors.Wrap(err)` is enough. The `{Code, Op, Err}` row nests a plain wrap
+inside the coded one because `WithCode(code, op, err)` would render
+`cause (op)`, reordering the text, and would make the `op` the user-facing
+message. The `{Code, Message, Err}` row changes output on purpose: the struct's
+`Error()` preferred `Err` and never printed `Message`, and `WithCode` prints both.
+
+Two habits from the struct do not survive a mixed codebase:
+
+- **A helper must not borrow its caller's `op`.** Under the struct convention a
+  helper often takes `op` as a parameter so its errors name the operation the
+  caller is performing. Its error then already starts with `op`, and a caller that
+  wraps it again prints `op: op: …`. Either give the helper its own `op`, or return
+  its error unwrapped, or drop the strings and let the frames name each hop.
+- **An `op` never goes in a message.** `{Code, Op, Message}` leaves were often
+  flattened to a message of `op + ": " + text`. In `errcode` that message is the
+  user-facing one, and an internal function name is exactly what `Message`
+  promises never to show. Keep `op` in a wrap around the leaf:
+  `errors.WrapWithMessage(errcode.New(code, text), op)`.
 
 ## Attaching Context for Logs
 
@@ -578,7 +612,8 @@ aside to keep the surface small and the behavior predictable.
 - **No `Op` strings.** The manual logical-stack-trace convention, tagging each wrap
   with `"Type.Method"`, is replaced by the compiler-recorded call site, so there is
   nothing to write or keep in sync. If you still want that one-line form in the
-  message, pass it to `WrapWithMessage`.
+  message, pass it to `WrapWithMessage`. For moving a codebase off the `Op` struct,
+  see [Coming from `Error{Code, Message, Op, Err}`](#coming-from-errorcode-message-op-err).
 - **No deferred/lazy message API.** A `Wrap` variant taking a message *callback*
   (so an expensive message is formatted only when the error is non-nil) was
   prototyped and dropped. In the usual `if err != nil { return WrapWithMessage(err,

@@ -193,7 +193,7 @@ issues surfaced, in priority order.
       message beneath it, pinned by a test. Table cases in `code_test.go` and the
       `TestCodedChainReportsOutermostCodeAndMessage` property cover it; `Code` still
       costs one chain walk (45 ns).
-- [ ] **Document migrating *from* `Op` strings — Low-Medium Impact, Low Effort.**
+- [x] **Document migrating *from* `Op` strings — Low-Medium Impact, Low Effort.**
       `philosophy.md` says "No `Op` strings" and offers `WrapWithMessage(err, op)` for
       keeping the one-line form, but says nothing about the two ways that form breaks
       once both conventions mix. First, a helper that borrows its caller's `op` returns an
@@ -206,7 +206,11 @@ issues surfaced, in priority order.
       `{Code, Message}` → coded leaf; `{Code, Op, Err}` →
       `WithCode(code, "", WrapWithMessage(err, op))`, because `WithCode`'s
       `"cause (message)"` rendering would otherwise reorder the text), and a note
-      that `Op` belongs in wraps and never in `Message`.
+      that `Op` belongs in wraps and never in `Message`. Done: `philosophy.md` has a
+      "Coming from `Error{Code, Message, Op, Err}`" subsection under Domain Codes, with
+      the mapping (including `{Code, Message, Err}`, whose `Message` the struct never
+      printed) and the two habits that break, and the "No `Op` strings" non-choice
+      links to it.
 - [ ] **Not planned: de-duplicating repeated wraps at runtime.** A `WrapWithMessage`
       that skips itself when the cause already starts with the same message would hide
       the structural mistake and swallow real repeated frames from recursion. If
