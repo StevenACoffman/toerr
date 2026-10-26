@@ -60,7 +60,9 @@ This repository's root package,
 standard library. It re-exports `Is`, `As`, `Unwrap`, and `Join` unchanged, and
 adds four things the standard library leaves out:
 
-- `New` and `Wrap` **record where they were called** (file, line, function).
+- `New`, `Wrap`, and `Wrapf` **record where they were called** (file, line,
+  function), so the message can say what was being attempted and leave the
+  location to the library.
 - Both accept trailing `slog.Attr` values, so an error carries **structured
   context** for logging, not just a string.
 - `Mark` / `AsType` let you **tag an error for control flow** by type, and `Seal`
@@ -260,18 +262,25 @@ init app: load config "/etc/app.yaml": open /etc/app.yaml: no such file or direc
 strings. When that message shows up in a log, you get the *what* but not the
 *where*, you are left grepping the source for the literal text `load config`.
 
-This repository closes that gap. `Wrap` records the call site as the error passes
-through; `WrapWithMessage` does the same and also prefixes a message:
+This repository closes that gap without giving up the message. `Wrapf` prefixes a
+formatted message, as `fmt.Errorf` does, and records the call site;
+`WrapWithMessage` does the same with a fixed message and trailing attributes; a bare
+`Wrap` records only the call site:
 
 ```go
-// Wrap: add location (and optional attrs), no message change.
+// Wrapf: say what was being attempted, plus location.
 if err != nil {
-	return errors.Wrap(err)
+	return errors.Wrapf(err, "load config %q", path)
 }
 
-// WrapWithMessage: add "message: cause" plus location.
+// WrapWithMessage: the same, with identifiers as attributes.
 if err != nil {
-	return errors.WrapWithMessage(err, fmt.Sprintf("load config %q", path))
+	return errors.WrapWithMessage(err, "charge card", slog.Int("order", id))
+}
+
+// Wrap: location only, for a hop that adds nothing about intent.
+if err != nil {
+	return errors.Wrap(err)
 }
 ```
 
@@ -290,16 +299,55 @@ main.initApp
 	/app/init.go:9
 ```
 
+### Context Chain, Return Trace, Stack Trace
+
+An operator reading a failed request can ask three different questions, and each one
+has its own record:
+
+| Record        | Answers                                                  | Recorded by                                              |
+| ------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| Context chain | What was the program trying to do?                       | messages and `slog` attributes, one layer at a time      |
+| Return trace  | Which layers passed the error on instead of handling it? | one frame per `New`, wrap, or `errcode` constructor      |
+| Stack trace   | Which functions were on the stack when it was created?   | a runtime snapshot; here only `errors.Recover` takes one |
+
+None of them replaces another. The context chain is the one an operator reads first,
+because it is the only one that carries intent: `charge card: authorize payment:
+connection refused` says what failed in the program's own terms. Frames are mechanical.
+They name a function and a line, and they mean something only with that commit's
+source open. The return trace's own contribution is propagation: each frame marks a
+layer that chose not to handle the error, so it shows where handling should have
+happened. A stack trace shows how the program reached the creation site, which matters
+when the bug is at that site.
+
+`fmt.Errorf` records only the context chain. A bare `Wrap` records only a frame.
+`Wrapf` and `WrapWithMessage` record both.
+
+Intent has a home at each scope, and it is cheapest to record where it is known:
+
+- **Per request**: the request ID and the authenticated user. Attach them once, to the
+  request's context or its trace span, where the handler's logger reads them, not to
+  every wrap.
+- **Per task**: which job, shard, or item a goroutine was working on. Only the code
+  that starts the task knows that, so attach it there.
+- **Per step**: what this function was attempting. Write it as the message of the
+  wrap, with identifiers as attributes.
+
 ### How Often to Wrap
 
-`Wrap` is cheap and message-free, so wrap density is your choice, not the package's. A
-bare `Wrap(err)` adds a frame and nothing else, so you can wrap at *every* return for a
-dense origin-to-caller trace, or only where an error crosses a *package* boundary (the
-level the `wrapcheck` linter enforces) for a sparse one. Wrap where a frame adds
-information: a run of same-package pass-throughs that add no message is noise, not
-signal. When in doubt, wrap at boundaries and add a message only where you have real
-context. For whether a return trace is worth adopting in your project at all, see the
-README's "When Not to Reach for This" section.
+Add a message wherever you know what was being attempted, as in
+`Wrapf(err, "load config %q", path)` or
+`WrapWithMessage(err, "charge card", slog.Int("order", id))`. Name the operation in the
+message and put identifiers in attributes, where logs can query them. Format a value
+into the message only when the message means little without it, as a path usually
+does.
+
+Use a bare `Wrap` for a hop that passes the error on without adding meaning, where
+only the location is new. It is cheap and message-free, so the density of those is your
+choice, not the package's. You can wrap at *every* return for a dense trace, or only
+where an error crosses a *package* boundary (the level the `wrapcheck` linter enforces)
+for a sparse one. A run of same-package pass-throughs that add no message is noise.
+For whether a return trace is worth adopting in your project at all, see the README's
+"When Not to Reach for This" section.
 
 ### Return Trace, Not Stack Trace
 
@@ -307,22 +355,23 @@ Each `New` and `Wrap` records a single frame, its own call site. Collected along
 the chain and printed origin-first, they form a **return trace**: the path the
 error took as it was returned out to the caller.
 
-This is the automatic successor to the manual *logical stack trace*, the older
-convention of tagging each wrap with an `Op` string such as
-`"UserService.CreateUser"` so an operator could read the program flow on a single
-line. Here the compiler records the location for you, so there is no `Op` to write
-or keep in sync. If you still want that one-line, greppable form in the message,
-pass it to `WrapWithMessage`, as in
-`errors.WrapWithMessage(err, "sqlite.UserService.CreateUser")`.
+An `Op` string, in the older *logical stack trace* convention, did two jobs. Naming
+the function, as in `"sqlite.UserService.CreateUser"`, records location, and the frame
+now records that for you, so there is no function-name `Op` to write or keep in sync.
+Naming the operation, as in `"create user"`, records intent, and nothing records that
+for you. Keep it as the message:
+`errors.WrapWithMessage(err, "create user", slog.String("invite", id))`.
 
-This is a different thing from a stack trace. A stack trace is captured once, at
-creation, and answers *how did we get to where the error started?* A return trace
-is built incrementally, one frame per wrap, and answers *how did this escalate on
-its way out?* Because it is assembled as the error propagates rather than
-captured in a single snapshot, it works even when the error is sent over a channel
-or stored and returned from a different goroutine, where a creation-time stack
-would be misleading. No full stack and no runtime tail: `%+v` shows only the
-frames you wrapped through. This follows the `braces.dev/errtrace` model.
+A return trace is a different record from a stack trace. A stack trace is captured
+once, at creation, and answers *how did we get to where the error started?* A return
+trace is built incrementally, one frame per wrap, and answers *how did this escalate
+on its way out?* Because it is assembled as the error propagates, it still answers
+that question when the error is sent over a channel or returned from another
+goroutine: the frames after the hop show which collector passed it on. What they
+cannot show is which task failed, because the frames record plumbing, not purpose.
+That is context-chain information, and it has to be attached where the task starts.
+No full stack and no runtime tail: `%+v` shows only the frames you wrapped through.
+This follows the `braces.dev/errtrace` model.
 
 The trace machinery keys off `errtrace`'s exported marker interface, any error
 with a `TracePC() uintptr` method contributes a frame, and this package's errors
@@ -406,7 +455,9 @@ That seal is what "translate before they escape" means in practice: after it,
 caller. Seal when hiding a dependency (the not-found path above); link without a seal
 when the cause is your own (the `StatusInternal` path). `Link` returns nil for a nil
 cause, as `errors.Wrap` does. Where the failure starts in your own code, with no cause
-to carry, `errcode.New(code, message)` is the coded leaf.
+to carry, `errcode.New(code, message)` is the coded leaf. Give every coded leaf a
+message. Without one, it renders as its code in words (`not found`), and the user
+sees only the transport's generic text.
 
 `WithCode` and `WithCodeOpaque` are deprecated spellings of `Link` and of `Link` over a
 sealed cause. They keep their behaviour, including a coded leaf for a nil cause, so an
@@ -460,8 +511,10 @@ and another for a wrap. Each shape has a direct spelling here:
 | `{Code, Message, Err}` | `errcode.Link(code, message, err)`                            |
 
 The `{Op, Err}` row renders `op: cause`, exactly as the struct did, and records a
-frame besides; once every leaf and wrap records one, `%+v` already shows the path,
-and `errors.Wrap(err)` is enough. The `{Code, Op, Err}` row nests a plain wrap
+frame besides. Which spelling to pick depends on what the `op` said. An `op` that only
+named the function is location, which the frame already records, so `errors.Wrap(err)`
+is enough. An `op` that described the operation is intent, so keep it as the message,
+and move any identifiers in it to attributes. The `{Code, Op, Err}` row nests a plain wrap
 inside the coded one because `Link(code, op, err)` would render
 `cause (op)`, reordering the text, and would make the `op` the user-facing
 message. The `{Code, Message, Err}` row changes output on purpose: the struct's
@@ -473,7 +526,8 @@ Two habits from the struct do not survive a mixed codebase:
   helper often takes `op` as a parameter so its errors name the operation the
   caller is performing. Its error then already starts with `op`, and a caller that
   wraps it again prints `op: op: …`. Either give the helper its own `op`, or return
-  its error unwrapped, or drop the strings and let the frames name each hop.
+  its error unwrapped, or drop function-name strings and let the frames name each
+  hop.
 - **An `op` never goes in a message.** `{Code, Op, Message}` leaves were often
   flattened to a message of `op + ": " + text`. In `errcode` that message is the
   user-facing one, and an internal function name is exactly what `Message`
@@ -556,16 +610,17 @@ graph TD
     C --> F{Can this layer<br/>handle it meaningfully?}
     D --> F
     F -->|yes| G[Handle it here]
-    F -->|no| H[Wrap to add location<br/>errors.Wrap]
+    F -->|no| H[Wrap: say what was attempted<br/>errors.Wrapf, or errors.Wrap]
     H --> I[Return to the caller]
     I --> F
     G --> Z[One top-level handler<br/>log the trace, map the code to a status]
     I -.unhandled.-> Z
 ```
 
-The diagram encodes two rules the earlier prose argues for: wrapping adds
-**location**, not just a string prefix, and an error is **handled once**, at the
-single top-level handler, rather than logged at every layer on the way up.
+The diagram encodes two rules the earlier prose argues for: a wrap adds **intent**
+where the layer knows it, and the library adds the **location**; and an error is
+**handled once**, at the single top-level handler, rather than logged at every layer
+on the way up.
 
 ## Choosing a Pattern
 
@@ -592,8 +647,9 @@ graph TD
 02. Compare with `errors.Is` and extract with `errors.As` / `AsType` (or `AsBehavior`
     for a behavior interface): never `==` or a bare type assertion, which miss
     wrapped errors.
-03. Wrap for context as errors rise, but capture **location**, not just a string
-    prefix, use `errors.Wrap` / `errors.WrapWithMessage`.
+03. Say what was being attempted when you wrap (`errors.Wrapf`,
+    `errors.WrapWithMessage`), with identifiers as attributes. The library records the
+    location; a bare `errors.Wrap` is for a hop that adds nothing else.
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
     or sentinels at the boundary, sealing the cause with `errors.Seal`. Do not let
     them leak to callers.
@@ -613,7 +669,7 @@ graph TD
 
 ## The Packages in This Repository
 
-- `errors` (root): the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
+- `errors` (root): the primary API: `New`, `Wrap`, `Wrapf`, `WrapWithMessage`, `Mark`,
   `Seal`, `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
   `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
   renders a return trace under `%+v`.
@@ -635,11 +691,13 @@ aside to keep the surface small and the behavior predictable.
   [Return Trace, Not Stack Trace](#return-trace-not-stack-trace)): the path the
   error took on the way out, with no runtime tail and far less allocation than a
   stack snapshot.
-- **No `Op` strings.** The manual logical-stack-trace convention, tagging each wrap
-  with `"Type.Method"`, is replaced by the compiler-recorded call site, so there is
-  nothing to write or keep in sync. If you still want that one-line form in the
-  message, pass it to `WrapWithMessage`. For moving a codebase off the `Op` struct,
-  see [Coming from `Error{Code, Message, Op, Err}`](#coming-from-errorcode-message-op-err).
+- **No function-name `Op` strings.** Tagging each wrap with `"Type.Method"` is
+  replaced by the compiler-recorded call site, so there is nothing to write or keep in
+  sync. An `Op` that described the operation is not replaced: it is intent, and it
+  belongs in the message (see
+  [Return Trace, Not Stack Trace](#return-trace-not-stack-trace)). For moving a
+  codebase off the `Op` struct, see
+  [Coming from `Error{Code, Message, Op, Err}`](#coming-from-errorcode-message-op-err).
 - **No deferred/lazy message API.** A `Wrap` variant taking a message *callback*
   (so an expensive message is formatted only when the error is non-nil) was
   prototyped and dropped. In the usual `if err != nil { return WrapWithMessage(err,
