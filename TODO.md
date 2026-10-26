@@ -22,17 +22,17 @@ ______________________________________________________________________
       and shipping `slog.LogValuer` on every error, which makes per-layer
       `logger.Error("…", "err", err)` frictionless — the stacked-logline
       anti-pattern (Gap 4).
-- [ ] Address the absence of a `context`-based field collector that also captures
+- [x] Address the absence of a `context`-based field collector that also captures
       **success-path** fields (cache hit/miss, durations) an error can never carry
-      (Gap 3).
+      (Gap 3). Done: `errors/logctx` (`Init`, `Add`, `Scope`, `Attrs`), built per
+      `CONTEXT_COLLECTOR_SPEC.md` (§11 records the decisions), and named in
+      `philosophy.md`'s per-request advice.
 - Options: add a `ctx` field-collector helper (`AddLogField(ctx, …)` style),
   and/or scope `LogValuer` to "log at the boundary only" with an explicit
   warning against per-layer logging.
-- Decided 2026-10-26: build the collector `CONTEXT_COLLECTOR_SPEC.md` describes,
-  drawing on `~/clog` and `~/slog-context`, rather than adopt one as a dependency.
-  Deferred for now. When it lands, `philosophy.md`'s "Context Chain, Return Trace,
-  Stack Trace" section, which says per-request fields belong on the context or the
-  trace span without naming a mechanism, should name it.
+- Still open: the enforcement half of Gap 4, a lint that reports a logger call
+  outside the boundary. `logctx` removes the reason for one, since a lower layer can
+  record a field without logging.
 - Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
   remaining actionable item).
 

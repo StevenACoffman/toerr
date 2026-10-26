@@ -1,10 +1,12 @@
 # Specification: Context-Based Log-Field Collector
 
-Status: **draft / proposal — decision required.** Tracks TODO item 1 (Gap 3):
-"Address the absence of a `context`-based field collector that also captures
-success-path fields (cache hit/miss, durations) an error can never carry."
+Status: **implemented** as `errors/logctx` (2026-10-26), by the build path (Option B).
+§11 records how each open question was settled and where the code departs from §6.
+Tracks TODO item 1 (Gap 3): "Address the absence of a `context`-based field collector
+that also captures success-path fields (cache hit/miss, durations) an error can never
+carry."
 
-This spec exists to be reviewed *before* code. There is mature prior art
+This spec was written to be reviewed *before* code. There is mature prior art
 (`veqryn/slog-context`), so the headline question is **build vs adopt** (§5), and the
 **dependency impact** (§4) is the central input to that decision; the rest specifies the
 design for whichever path is chosen.
@@ -309,3 +311,37 @@ off-the-shelf library and must be built either way. Given toerr's zero-dependenc
 first-class); adopt slog-context only if its otel/grpc/logr ecosystem outweighs taking
 toerr's first dependency, in which case §6's API becomes the shape of the `Scope` layer
 added on top of `propagate` (with `slog-dedup` optional at the sink).
+
+______________________________________________________________________
+
+## 11. Decisions (2026-10-26)
+
+The open questions of §9, as settled:
+
+1. **Build.** `errors/logctx` is stdlib-only, so toerr's `go.sum` stays empty.
+2. **Placement:** `github.com/StevenACoffman/toerr/errors/logctx`, beside the other
+   subpackages. It imports nothing from toerr.
+3. **Nesting:** a repeated `Scope` nests, and each scope renders as a `slog.Group`.
+4. **Duplicates within a scope:** the last value wins, in the position of the first.
+5. **Order:** top-level fields first, then scopes, each in the order they were first
+   written. The tests pin it; nothing relies on it for correctness.
+6. **Lint for "log once":** still open, under TODO item 1.
+
+Where the code departs from §6, and why:
+
+- **A tree of scopes, not a `map[scopePath]`.** Each scope holds its fields and its
+  children in slices, so the snapshot keeps creation order without sorting.
+- **`Scope` with an empty name returns `ctx`.** slog inlines a group with an empty key,
+  which would bring back the collision `Scope` exists to prevent.
+- **An empty attr is ignored**, for the same reason.
+- **`Attrs` reads the whole request from any scope**, so the boundary need not hold on
+  to the unscoped context.
+- **`Init` is idempotent**, as `propagate.Init` is, so a second middleware cannot split
+  a request's fields in two.
+- **`Add` without `Init` does nothing.** `propagate.With` initializes instead, but the
+  context it returns never reaches the boundary, so the field would be lost silently.
+- **`...slog.Attr`, not `...any`**, matching `errors.New` and `errors.Wrap`, so no
+  argument parser is needed.
+
+From `clog`, only the private context-key type carried over. Its per-line `Handler`
+serves a different emit model, and its map loses insertion order.

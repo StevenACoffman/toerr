@@ -20,6 +20,7 @@ knowledge about your domain:
 
 - capturing the call site and building a return trace (`errors.New`, `errors.Wrap`);
 - carrying structured context as `slog.Attr` and rendering it for logs;
+- collecting a request's log fields on its context (`logctx`);
 - a container that holds a status code, a user message, and a cause (`errcode`);
 - the three role-based views: application code, end user, operator;
 - transport adapters that map a code to a status (`errhttp`, `errgrpc`).

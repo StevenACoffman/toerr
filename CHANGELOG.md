@@ -40,6 +40,9 @@ release notes when you tag it.
   `errclass`, and marks, while keeping its text, frames, and attributes for operators.
   It is the opposite of `Mark`.
 - `errors.Wrapf(err, format, args...)`: `WrapWithMessage` with a formatted message.
+- `errors/logctx`: a request-scoped collector of log fields, for the request's one log
+  line on the success and the failure path. `Init`, `Add`, `Scope` (a namespace per
+  parallel branch), and `Attrs`. Standard library only.
 - `errcode.New(code, message)`: the coded leaf.
 - `errcode.Link(code, message, err)`: the coded wrap.
 - `errcode.StatusUnavailable`, `StatusResourceExhausted`, `StatusAborted`,
