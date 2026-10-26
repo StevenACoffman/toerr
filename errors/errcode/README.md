@@ -36,8 +36,12 @@ never exposes the wrapped internal detail that `err.Error()` would.
   reclassifies, so it does not hide the message beneath it. Show this to clients;
   never fall back to `err.Error()`.
 - `errcode.Code(err) (StatusCode, string)`: `Status` and `Message` together.
-- Codes: `StatusInvalidArgument`, `StatusNotFound`, `StatusUnauthenticated`,
-  `StatusPermissionDenied`, `StatusAlreadyExists`, `StatusInternal`, and more.
+- Codes: the gRPC canonical set apart from `OK`, such as `StatusInvalidArgument`,
+  `StatusNotFound`, `StatusPermissionDenied`, and `StatusInternal`. Each code's
+  godoc says whether a retry can help. `StatusUnavailable` and
+  `StatusResourceExhausted` can be retried after backoff, and `StatusAborted`
+  by repeating the whole read-modify-write. So a boundary can decide a retry from
+  `Status` alone.
 
 ## Example
 

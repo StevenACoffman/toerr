@@ -8,9 +8,11 @@ import (
 
 // Status maps a domain status code to an HTTP status code. Unknown codes map to
 // 500 (no logging — this is a pure mapping).
+//
+//nolint:cyclop // flat exhaustive value mapping; inherent, not branching logic.
 func Status(code errcode.StatusCode) int {
 	switch code {
-	case errcode.StatusInternal, errcode.StatusUnknown:
+	case errcode.StatusInternal, errcode.StatusUnknown, errcode.StatusDataLoss:
 		return http.StatusInternalServerError
 	case errcode.StatusCanceled:
 		return http.StatusRequestTimeout
@@ -20,10 +22,16 @@ func Status(code errcode.StatusCode) int {
 		return http.StatusNotFound
 	case errcode.StatusDeadlineExceeded:
 		return http.StatusGatewayTimeout
-	case errcode.StatusInvalidArgument, errcode.StatusFailedPrecondition:
+	case errcode.StatusInvalidArgument,
+		errcode.StatusFailedPrecondition,
+		errcode.StatusOutOfRange:
 		return http.StatusBadRequest
-	case errcode.StatusAlreadyExists:
+	case errcode.StatusAlreadyExists, errcode.StatusAborted:
 		return http.StatusConflict
+	case errcode.StatusUnavailable:
+		return http.StatusServiceUnavailable
+	case errcode.StatusResourceExhausted:
+		return http.StatusTooManyRequests
 	case errcode.StatusUnauthenticated:
 		return http.StatusUnauthorized
 	case errcode.StatusPermissionDenied:

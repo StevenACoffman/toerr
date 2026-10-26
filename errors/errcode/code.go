@@ -12,25 +12,55 @@ import (
 	"github.com/StevenACoffman/toerr/errors/internal/trace"
 )
 
-// Union of HTTP status codes & gRPC status codes
-// (https://grpc.github.io/grpc/core/md_doc_statuscodes.html).
+// The gRPC canonical status codes (https://grpc.github.io/grpc/core/md_doc_statuscodes.html),
+// apart from OK, named without reference to any transport. Each code says whether
+// retrying can help, so a boundary decides retries from Status alone.
 //
 // Values are assigned by iota, so append new codes at the end only: inserting or
 // reordering renumbers every code below it. Each switch on StatusCode omits its
 // default arm so the exhaustive linter fails the build until a new code is handled;
 // no manual search for switches is needed.
 const (
+	// StatusUnknown means no code was attached. Treat it as Internal.
 	StatusUnknown StatusCode = iota
+	// StatusCanceled means the caller gave up, usually through its context.
 	StatusCanceled
+	// StatusInvalidArgument means the request is wrong whatever the system's state.
+	// Retrying the same request cannot succeed.
 	StatusInvalidArgument
+	// StatusDeadlineExceeded means time ran out. The operation may still have
+	// completed, so retry only an idempotent one.
 	StatusDeadlineExceeded
+	// StatusInternal means an invariant broke: a bug, not a condition to retry.
 	StatusInternal
+	// StatusNotFound means the requested entity does not exist.
 	StatusNotFound
+	// StatusUnauthenticated means the caller's identity could not be established.
 	StatusUnauthenticated
+	// StatusPermissionDenied means the caller is known but not allowed.
 	StatusPermissionDenied
+	// StatusAlreadyExists means the entity a create would make is already there.
 	StatusAlreadyExists
+	// StatusFailedPrecondition means the system is not in the state the operation
+	// needs. Retrying cannot help until something changes that state.
 	StatusFailedPrecondition
+	// StatusUnimplemented means the operation is not supported.
 	StatusUnimplemented
+	// StatusUnavailable means a transient failure, such as a dependency being
+	// down. Retry with backoff, if the operation is idempotent.
+	StatusUnavailable
+	// StatusResourceExhausted means a quota or rate limit ran out. Retry after
+	// backoff.
+	StatusResourceExhausted
+	// StatusAborted means a concurrency conflict, such as a failed transaction or
+	// a stale version. Retry the whole read-modify-write, not the last step.
+	StatusAborted
+	// StatusOutOfRange means the request reached past a valid range, such as an
+	// offset past the end. Unlike InvalidArgument, it may succeed once the range
+	// grows.
+	StatusOutOfRange
+	// StatusDataLoss means unrecoverable loss or corruption of data.
+	StatusDataLoss
 )
 
 // Compile-time interface implementation checks. TracePC is the errtrace-compatible
@@ -82,6 +112,16 @@ func (c StatusCode) String() string {
 		return "failed_precondition"
 	case StatusUnimplemented:
 		return "unimplemented"
+	case StatusUnavailable:
+		return "unavailable"
+	case StatusResourceExhausted:
+		return "resource_exhausted"
+	case StatusAborted:
+		return "aborted"
+	case StatusOutOfRange:
+		return "out_of_range"
+	case StatusDataLoss:
+		return "data_loss"
 	}
 	// No default arm on purpose: exhaustive (default-signifies-exhaustive) then forces
 	// every StatusCode to be named above, so a new code fails the build here. This

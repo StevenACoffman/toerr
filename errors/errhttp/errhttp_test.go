@@ -20,6 +20,11 @@ func TestStatus(t *testing.T) {
 		"already exists":    {errcode.StatusAlreadyExists, http.StatusConflict},
 		"internal":          {errcode.StatusInternal, http.StatusInternalServerError},
 		"unknown":           {errcode.StatusUnknown, http.StatusInternalServerError},
+		"unavailable":       {errcode.StatusUnavailable, http.StatusServiceUnavailable},
+		"exhausted":         {errcode.StatusResourceExhausted, http.StatusTooManyRequests},
+		"aborted":           {errcode.StatusAborted, http.StatusConflict},
+		"out of range":      {errcode.StatusOutOfRange, http.StatusBadRequest},
+		"data loss":         {errcode.StatusDataLoss, http.StatusInternalServerError},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

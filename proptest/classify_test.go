@@ -26,7 +26,9 @@ var (
 		errcode.StatusUnknown, errcode.StatusCanceled, errcode.StatusInvalidArgument,
 		errcode.StatusDeadlineExceeded, errcode.StatusInternal, errcode.StatusNotFound,
 		errcode.StatusUnauthenticated, errcode.StatusPermissionDenied, errcode.StatusAlreadyExists,
-		errcode.StatusFailedPrecondition, errcode.StatusUnimplemented,
+		errcode.StatusFailedPrecondition, errcode.StatusUnimplemented, errcode.StatusUnavailable,
+		errcode.StatusResourceExhausted, errcode.StatusAborted, errcode.StatusOutOfRange,
+		errcode.StatusDataLoss,
 	}
 )
 

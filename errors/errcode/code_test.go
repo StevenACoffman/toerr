@@ -234,15 +234,24 @@ func TestSealingTheResultHidesTheCode(t *testing.T) {
 }
 
 func TestStatusCodeString(t *testing.T) {
-	if errcode.StatusNotFound.String() != "not_found" {
-		t.Errorf(
-			"StatusNotFound.String() = %q, want %q",
-			errcode.StatusNotFound.String(),
-			"not_found",
-		)
+	cases := map[string]struct {
+		code errcode.StatusCode
+		want string
+	}{
+		"one word":           {errcode.StatusUnavailable, "unavailable"},
+		"two words":          {errcode.StatusNotFound, "not_found"},
+		"resource exhausted": {errcode.StatusResourceExhausted, "resource_exhausted"},
+		"aborted":            {errcode.StatusAborted, "aborted"},
+		"out of range":       {errcode.StatusOutOfRange, "out_of_range"},
+		"data loss":          {errcode.StatusDataLoss, "data_loss"},
+		"outside the set":    {errcode.StatusCode(999), "unknown"},
 	}
-	if errcode.StatusCode(999).String() != "unknown" {
-		t.Errorf("unknown code String() = %q, want %q", errcode.StatusCode(999).String(), "unknown")
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.code.String(); got != tc.want {
+				t.Errorf("String() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
