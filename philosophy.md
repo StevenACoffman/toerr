@@ -328,7 +328,8 @@ Intent has a home at each scope, and it is cheapest to record where it is known:
   request's context or its trace span, where the handler's logger reads them, not to
   every wrap.
 - **Per task**: which job, shard, or item a goroutine was working on. Only the code
-  that starts the task knows that, so attach it there.
+  that starts the task knows that, so attach it there (see
+  [Errors Across Goroutines](#errors-across-goroutines)).
 - **Per step**: what this function was attempting. Write it as the message of the
   wrap, with identifiers as attributes.
 
@@ -416,6 +417,70 @@ from single wrapping (`Unwrap() error`), and it shapes how joined errors behave:
 Use `%w` for a causal chain and `errors.Join` for a set of siblings. They
 compose: a joined error may contain wrapped errors, and a wrapped error may wrap
 a joined one.
+
+## Errors Across Goroutines
+
+A goroutine hands its error back through a channel, a struct field, or an `errgroup`,
+and the receiving side knows less about the work than the sending side did. Three
+habits keep the context chain whole across that hop.
+
+**Name the task where it starts.** The frames after the hop show which collector passed
+the error on, never which task failed. Only the code that starts the task knows that,
+so wrap there. `WrapWithMessage` returns nil for nil, so it can be the last line:
+
+```go
+for n, shard := range shards {
+	g.Go(func() error {
+		return errors.WrapWithMessage(render(ctx, shard), "render shard",
+			slog.Int("report", id), slog.Int("shard", n))
+	})
+}
+```
+
+**Report why a context ended.** Work that stops on `ctx.Done()` usually returns
+`ctx.Err()`, which is `context.Canceled` or `context.DeadlineExceeded`: it says the
+context ended, and not why. Code that ends a context for a reason, such as a shutdown
+or a spent time budget, should state it with `context.WithCancelCause`,
+`WithTimeoutCause`, or `WithDeadlineCause`, and the work should report
+`context.Cause(ctx)`. `errgroup.WithContext` already sets the cause to the group's
+first error. The cause replaces `ctx.Err()`, so mark it with `ctx.Err()` to keep
+`errors.Is(err, context.Canceled)` true for callers that check it:
+
+```go
+select {
+case <-ctx.Done():
+	return errors.WrapWithMessage(errors.Mark(context.Cause(ctx), ctx.Err()),
+		"wait for shard", slog.Int("shard", n))
+case r := <-results:
+	return use(r)
+}
+```
+
+**Keep the failures that matter.** `errgroup`'s `Wait` returns the first error and
+drops the rest. When one failure cancels the others, the first is usually the one
+that matters and the rest only report the cancellation. When the tasks fail
+independently, as items in a batch do, collect every error and join them:
+
+```go
+var (
+	g    errgroup.Group // no shared context: one failure does not cancel the rest
+	mu   sync.Mutex
+	errs []error
+)
+for _, item := range items {
+	g.Go(func() error {
+		if err := process(item); err != nil {
+			mu.Lock()
+			errs = append(errs, errors.WrapWithMessage(err, "process item",
+				slog.String("item", item.ID)))
+			mu.Unlock()
+		}
+		return nil
+	})
+}
+_ = g.Wait() // every task returns nil; the failures are in errs
+return errors.Join(errs...)
+```
 
 ## Domain Codes and Boundary Translation
 
@@ -576,6 +641,43 @@ lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and
 call site) lives in typed fields. See the README's "structure vs. context"
 section for why.
 
+## Failure Domains
+
+A failure should cost one request or one job, not the process. That unit is the
+failure domain, and panics and shared state are what break out of it.
+
+- **`net/http` recovers a panic in a handler, but not in a goroutine the handler
+  starts.** The server logs the handler's panic and closes that one connection. A
+  panic on any other goroutine ends the whole process, with every request in flight.
+- **Recover where a task starts, and name the task there.** The top of a goroutine is
+  the one place that knows both that a panic must stop there and which task it
+  interrupted. `errors.Recover` records the panic's stack as a `"stack"` attribute,
+  the one stack trace this package takes, because a panic's creation site is the
+  record that matters for it:
+
+  ```go
+  go func() {
+  	defer func() {
+  		if err := errors.Recover(recover()); err != nil {
+  			results <- errclass.WrapAs(errors.WrapWithMessage(err, "render shard",
+  				slog.Int("shard", n)), errclass.Panic)
+  		}
+  	}()
+  	results <- render(ctx, n)
+  }()
+  ```
+
+- **Shared state is the real risk.** A panic partway through updating a cache, a map
+  behind a lock, or a connection's protocol state leaves it half-changed for every
+  later request, and recovering does not undo that. Where a panic can leave shared
+  state inconsistent, discard the state (evict the entry, close the connection), or
+  let the process crash.
+- **Panic at detection only where something contains the crash.** Crashing is cheap
+  when a supervisor restarts the process and nothing else shares it, as with a
+  one-shot job or one replica among many. In a long-lived server, a panic in a
+  request's goroutine is recovered and costs only that request; a panic anywhere else
+  costs every request in flight.
+
 ## Knowing When to Give Up
 
 Not every error is worth handling:
@@ -583,7 +685,8 @@ Not every error is worth handling:
 - **Some failures are unrecoverable**: a violated invariant, internal
   inconsistency, out of memory. Prefer to `panic` at the point of detection
   rather than threading a check through code that cannot do anything useful with
-  it. Because `toerr` is a library, keep this distinction in mind: this applies
+  it, where something contains the crash (see [Failure Domains](#failure-domains)).
+  Because `toerr` is a library, keep this distinction in mind: this applies
   to application code, which owns the process. Library code should not `panic`
   across its API for ordinary or expected failures; return an error instead,
   recovering internally at the package boundary with `errors.Recover` if some
@@ -660,7 +763,8 @@ graph TD
 07. Map domain codes to a transport (HTTP status) only at the edge, never inside
     the error type.
 08. `panic` on unrecoverable invariant violations instead of threading checks that
-    cannot improve the outcome; where you can, design the error out of existence.
+    cannot improve the outcome, where a supervisor or a recover contains the crash;
+    where you can, design the error out of existence.
 09. Return errors rather than logging and continuing: let one high-level handler
     log the error with its trace and decide the response.
 10. Never return `(nil, nil)` from a single-entity lookup: a missing entity is a
