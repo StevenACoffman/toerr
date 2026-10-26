@@ -16,21 +16,23 @@ never exposes the wrapped internal detail that `err.Error()` would.
 
 - `errcode.New(code, message) error`: a coded leaf, where the failure is first
   understood. It has a code and a user message and no cause.
-- `errcode.WithCode(code, message, cause) error`: attach a code (and optional
-  user message) to an existing error. Keeps `cause` in the chain, so callers can
-  `errors.Is`/`As` into it (the `%w`-style contract). It is a wrap: a nil `cause`
-  still makes a leaf but is deprecated, and a future release will return nil for
-  it, as `errors.Wrap` does. Use `New` for leaves.
-- `errcode.WithCodeOpaque(code, message, cause) error`: same, but **severs** the
-  chain (the `%v`-style translation). The cause's text survives in `Error()` for
-  operators, but callers cannot match its type. Use it at a boundary so switching a
-  dependency cannot break a caller who matched on, say, `sql.ErrNoRows`.
+- `errcode.Link(code, message, err) error`: attach a code (and optional user
+  message) to an existing error. Keeps `err` in the chain, so callers can
+  `errors.Is`/`As` into it (the `%w`-style contract). Returns nil for a nil `err`,
+  as `errors.Wrap` does.
+- `errcode.Link(code, message, errors.Seal(err))`: the same, with the cause sealed
+  (the `%v`-style translation). Callers match the code and cannot match the cause;
+  operators still see its text, trace, and attributes. Use it at a boundary so
+  switching a dependency cannot break a caller who matched on, say, `sql.ErrNoRows`.
+  Seal the cause, not the result: a seal around `Link` hides the code too.
+- `errcode.WithCode` and `errcode.WithCodeOpaque` are deprecated spellings of the
+  two above. They keep their behaviour, including a coded leaf for a nil cause.
 - Every constructor records its call site, so a coded error appears in the
   `%+v` return trace like any other hop.
 - `errcode.Status(err) StatusCode`: the outermost code, or `StatusUnknown` if none.
   A wrap can reclassify for its own callers.
 - `errcode.Message(err) string`: the outermost non-empty user-facing message, or
-  `""`. A coded wrap without a message, `WithCode(code, "", err)`, only
+  `""`. A coded wrap without a message, `Link(code, "", err)`, only
   reclassifies, so it does not hide the message beneath it. Show this to clients;
   never fall back to `err.Error()`.
 - `errcode.Code(err) (StatusCode, string)`: `Status` and `Message` together.
@@ -51,7 +53,7 @@ import (
 
 func main() {
 	cause := errors.New("sql: no rows in result set")
-	err := errcode.WithCode(errcode.StatusNotFound, "user not found", cause)
+	err := errcode.Link(errcode.StatusNotFound, "user not found", cause)
 
 	fmt.Println(err)                 // full detail for logs
 	code, msg := errcode.Code(err)

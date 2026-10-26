@@ -65,7 +65,8 @@ trailing `slog.Attr` values, surfaced at your log boundary with `errors.LogValue
 / `errors.Attrs`.
 - **[A return trace](#return-trace)** under `%+v`, not a heavyweight stack trace.
 - **[Type marks for control flow](#marks-and-astype)**: `Mark` / `AsType` tag an
-error by type without disturbing its message or `Unwrap` chain.
+error by type without disturbing its message or `Unwrap` chain, and `Seal` does the
+opposite: it hides an error from matching while operators still see all of it.
 - **[A true drop-in](#drop-in-replacement)**: `Is`, `As`, `Unwrap`, `Join`
 re-exported unchanged, and foreign errors interoperate.
 
@@ -206,6 +207,19 @@ if _, ok := errors.AsType[*NotFoundError](err); ok {
 }
 ```
 
+[`Seal`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Seal) is the
+opposite of `Mark`. `Mark` adds a match; `Seal` removes every match beneath it, so
+`Is`, `As`, `AsType`, `AsBehavior`, `errcode`, and `errclass` all stop at the seal.
+The message, the `%+v` trace, and `Attrs` are unchanged. Seal a dependency's error
+where it enters your domain, then mark or code it outside the seal, so callers
+match your meaning and never the dependency's:
+
+```go
+err = errors.Mark(errors.Seal(err), ErrNotFound) // matches ErrNotFound, not sql.ErrNoRows
+```
+
+Seal the cause, not the result: a seal around a mark or a code hides that too.
+
 ## Design
 
 This package makes three decisions that plain `fmt.Errorf` wrapping does not, one
@@ -288,13 +302,15 @@ I measured on an Apple M1 Pro, 6 runs each; the numbers barely varied between ru
 | `WrapWithMessage`                           |   134 |   64 |         1 | yes                      |
 | `New`                                       |   135 |   64 |         1 | yes                      |
 | `errcode.New`                               |   136 |   48 |         1 | yes                      |
-| `errcode.WithCode`                          |   133 |   48 |         1 | yes                      |
-| `errcode.WithCodeOpaque`                    |   168 |   64 |         2 | yes                      |
+| `errcode.Link`                              |   133 |   48 |         1 | yes                      |
+| `errcode.Link` over a `Seal`ed cause        |   148 |   64 |         2 | yes                      |
 | `Mark` on an error that already has a trace |    14 |   32 |         1 | no                       |
+| `Seal`                                      |     9 |   16 |         1 | no                       |
 | `fmt.Errorf("…: %w")`                       |    76 |   48 |         2 | no                       |
 | `runtime.Callers(3, pcs[:1])` alone         |  ~128 |    0 |         0 | (it is the call)         |
 
-These numbers are from Go 1.27.1 on arm64, and the `errcode` rows from Go 1.27.2. A
+These numbers are from Go 1.27.1 on arm64, and the `errcode` and `Seal` rows from Go
+1.27.2 (3 runs each). A
 copy of the same error struct without the frame capture costs 14 ns. The capture
 itself allocates nothing, so the one allocation is the 64-byte error (48 bytes for a
 coded one); attributes add a second. Stack depth doesn't change the cost. Against
@@ -376,9 +392,9 @@ worth knowing before you adopt it.
   not auto-expand when logged. Log the error once, at a single top-level handler,
   with `errors.Attrs` / `errors.LogValue`. Lower layers wrap (for location) and
   return, not log.
-- **Do not leak dependencies at boundaries.** `WithCode` keeps the cause matchable;
-  use `WithCodeOpaque` when translating a dependency error you do not want callers
-  coupling to.
+- **Do not leak dependencies at boundaries.** `errcode.Link` keeps the cause
+  matchable; `errors.Seal` the cause first when translating a dependency error you do
+  not want callers coupling to.
 - **Not every project needs this.** For a small library or CLI, the standard library
   plus disciplined `fmt.Errorf` wrapping is usually enough. This package earns its
   keep in larger, long-lived services where the debugging cost of thin errors is
@@ -403,13 +419,13 @@ synchronous, you may not need it.
 
 ## Subpackages
 
-| Package    | Purpose                                                                      |
-| ---------- | ---------------------------------------------------------------------------- |
-| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`.    |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                  |
-| `errcode`  | Transport-neutral status codes (`New`/`WithCode`/`Code`/`Status`/`Message`). |
-| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.            |
-| `errclass` | Coarse severity classification that folds across joined errors.              |
+| Package    | Purpose                                                                           |
+| ---------- | --------------------------------------------------------------------------------- |
+| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `Seal`, `AsType`, `Attrs`. |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                       |
+| `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).          |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                 |
+| `errclass` | Coarse severity classification that folds across joined errors.                   |
 
 Each subpackage has its own README:
 
