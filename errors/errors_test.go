@@ -157,6 +157,7 @@ func TestErrorDoesNotAutoExpandInSlog(t *testing.T) {
 func TestNilInputsReturnNil(t *testing.T) {
 	assert(t, errors.Wrap(nil) == nil, "Wrap(nil) should be nil")
 	assert(t, errors.WrapWithMessage(nil, "m") == nil, "WrapWithMessage(nil, ...) should be nil")
+	assert(t, errors.Wrapf(nil, "m %d", 1) == nil, "Wrapf(nil, ...) should be nil")
 	assert(t, errors.Mark(nil, errors.New("m")) == nil, "Mark(nil, ...) should be nil")
 }
 
@@ -167,6 +168,22 @@ func TestWrapWithMessage(t *testing.T) {
 	equals(t, "reading config: leaf", wrapped.Error())
 	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
 	equals(t, 2, len(errors.Attrs(wrapped)))
+}
+
+// Wrapf is WrapWithMessage with a formatted message, so it must behave the same way
+// apart from the formatting.
+func TestWrapf(t *testing.T) {
+	leaf := errors.New("leaf", slog.Int("id", 1))
+	wrapped := errors.Wrapf(leaf, "load config %q (attempt %d)", "/etc/app.yaml", 2)
+
+	equals(t, `load config "/etc/app.yaml" (attempt 2): leaf`, wrapped.Error())
+	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
+	equals(t, 1, len(errors.Attrs(wrapped)))
+
+	trace := fmt.Sprintf("%+v", wrapped)
+	equals(t, 2, countFrames(trace))
+	assert(t, strings.Contains(trace, "TestWrapf"),
+		"Wrapf should record its caller's frame:\n"+trace)
 }
 
 func TestJoinRendersEveryBranch(t *testing.T) {

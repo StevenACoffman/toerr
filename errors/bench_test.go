@@ -56,6 +56,14 @@ func BenchmarkWrapWithMessage(b *testing.B) {
 	}
 }
 
+// BenchmarkWrapf adds the Sprintf that fmt.Errorf also pays.
+func BenchmarkWrapf(b *testing.B) {
+	leaf := errors.New("boom")
+	for b.Loop() {
+		errSink = errors.Wrapf(leaf, "context %d", 7)
+	}
+}
+
 func BenchmarkMark(b *testing.B) {
 	b.Run("foreign", func(b *testing.B) {
 		cause, marker := stderrors.New("boom"), stderrors.New("marker")

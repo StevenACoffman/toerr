@@ -108,8 +108,9 @@ func TestWrapWithMessageComposesOutermostFirst(t *testing.T) {
 	})
 }
 
-// TestTraceHasOneFramePerHop checks that %+v records exactly one frame for each New, Wrap and
-// WrapWithMessage in the chain, plus one for a Mark that had to give a foreign error a frame,
+// TestTraceHasOneFramePerHop checks that %+v records exactly one frame for each New, Wrap,
+// WrapWithMessage and Wrapf in the chain, plus one for a Mark that had to give a foreign error a
+// frame,
 // and none for a Mark of an error that already had one. A Seal adds none, and hides the frames
 // behind it from Mark, so a Mark just outside a seal records one.
 //
@@ -128,7 +129,7 @@ func TestTraceHasOneFramePerHop(t *testing.T) {
 		}
 
 		ops := rapid.SliceOfN(
-			rapid.SampledFrom([]string{"wrap", "message", "mark", "seal"}), 1, 8,
+			rapid.SampledFrom([]string{"wrap", "message", "wrapf", "mark", "seal"}), 1, 8,
 		).Draw(t, "ops")
 		for _, op := range ops {
 			switch op {
@@ -136,6 +137,8 @@ func TestTraceHasOneFramePerHop(t *testing.T) {
 				err = errors.Wrap(err)
 			case "message":
 				err = errors.WrapWithMessage(err, "context")
+			case "wrapf":
+				err = errors.Wrapf(err, "context %d", len(ops))
 			case "mark":
 				err = errors.Mark(err, stderrors.New("marker"))
 				if traced {

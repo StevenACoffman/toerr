@@ -25,6 +25,17 @@ func ExampleJoin() {
 	// Output: true
 }
 
+// Wrapf says what was being attempted, in the same breath as fmt.Errorf, and also
+// records where.
+func ExampleWrapf() {
+	err := errors.Wrapf(fs.ErrNotExist, "load config %q", "/etc/app.yaml")
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, fs.ErrNotExist))
+	// Output:
+	// load config "/etc/app.yaml": file does not exist
+	// true
+}
+
 // AsType matches a type attached by Mark, anywhere up the chain.
 func ExampleMark() {
 	err := errors.Mark(errors.New("upstream 429"), &exampleRateLimitError{})

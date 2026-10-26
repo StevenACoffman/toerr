@@ -61,6 +61,22 @@ func WrapWithMessage(err error, message string, attrs ...slog.Attr) error {
 	return &annotatedError{msg: message, cause: err, pc: trace.CallerPC(), attrs: attrs}
 }
 
+// Wrapf is WrapWithMessage with the message formatted by fmt.Sprintf, so a wrap that
+// says what was being attempted is as short to write as fmt.Errorf:
+//
+//	return errors.Wrapf(err, "load config %q", path)
+//
+// It takes no attributes, because the variadic arguments belong to the format; use
+// WrapWithMessage to attach both. Do not use %w: err is already the cause. go vet
+// reports a %w in the format, as it does for any Sprintf wrapper. Returns nil if err
+// is nil.
+func Wrapf(err error, format string, args ...any) error {
+	if err == nil {
+		return nil
+	}
+	return &annotatedError{msg: fmt.Sprintf(format, args...), cause: err, pc: trace.CallerPC()}
+}
+
 // Mark tags err with marker so that Is(err, marker) is true and AsType[T](err)
 // is true for marker's type T. The marker joins neither the message nor the
 // Unwrap chain: Unwrap still reaches err, so the mark is transparent.
