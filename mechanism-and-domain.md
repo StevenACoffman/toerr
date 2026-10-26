@@ -22,7 +22,7 @@ knowledge about your domain:
 - carrying structured context as `slog.Attr` and rendering it for logs;
 - a container that holds a status code, a user message, and a cause (`errcode`);
 - the three role-based views: application code, end user, operator;
-- transport adapters that map a code to a status (`errhttp`).
+- transport adapters that map a code to a status (`errhttp`, `errgrpc`).
 
 None of that encodes what *your* failures are. It is plumbing.
 
@@ -78,8 +78,8 @@ the user sees the message, the operator sees the trace), exactly as in
 
 ## On Error Codes: Start Small
 
-`errcode` includes a generic set drawn from HTTP and gRPC. Treat it the way Ben
-Johnson does. Begin with the few codes you actually need, and grow the set only when
+`errcode` includes a generic set, gRPC's canonical codes apart from `OK`. Treat it
+the way Ben Johnson does. Begin with the few codes you actually need, and grow the set only when
 a caller must branch on a distinction it cannot yet make. If your domain needs a
 category the generic set does not capture, do not stretch a status to fit; name it
 with a domain sentinel or a `Mark`, which live in your package and mean exactly
@@ -88,7 +88,7 @@ what you say they mean.
 A fully domain-owned code *type*, a generic `Link[C]` parameterized over your
 own `Code` type, is also possible but rarely worth it. It costs a type
 parameter at every extraction site (`Status[myapp.Code](err)`, which fails silently
-if you name the wrong type) and forfeits the ready-made `errhttp` adapter, since the
+if you name the wrong type) and forfeits the ready-made `errhttp` and `errgrpc` adapters, since the
 library can no longer map a code type it does not know. Reach for a sentinel or a
 `Mark` first; prefer a generic coded type only when you have many domain categories
 that must all round-trip as one strongly-typed set.

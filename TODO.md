@@ -7,7 +7,11 @@ and rationale.
 
 Resolved and therefore **not** listed: sealing a cause at a boundary
 (`errors.Seal`, which the deprecated `errcode.WithCodeOpaque` now delegates to), and acknowledging the enrich-vs-log debate (README's
-"unsettled debate" section). Deliberately **out of scope**: namespaced/global
+"unsettled debate" section). Also resolved, from the "Ow! My Foot!" review
+(2026-10-26): `errors.Wrapf`; a readable message-less coded leaf; the rest of gRPC's
+codes, so `errcode.Status` is the one retry signal at a boundary; the `errclass.Panic`
+documentation; the `errgrpc` adapter; and the guide's and README's three-record model,
+failure domains, and errors across goroutines. Deliberately **out of scope**: namespaced/global
 domain codes (Gap 7) — a documented, intentional divergence, not a defect.
 
 ______________________________________________________________________
@@ -24,6 +28,11 @@ ______________________________________________________________________
 - Options: add a `ctx` field-collector helper (`AddLogField(ctx, …)` style),
   and/or scope `LogValuer` to "log at the boundary only" with an explicit
   warning against per-layer logging.
+- Decided 2026-10-26: build the collector `CONTEXT_COLLECTOR_SPEC.md` describes,
+  drawing on `~/clog` and `~/slog-context`, rather than adopt one as a dependency.
+  Deferred for now. When it lands, `philosophy.md`'s "Context Chain, Return Trace,
+  Stack Trace" section, which says per-request fields belong on the context or the
+  trace span without naming a mechanism, should name it.
 - Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
   remaining actionable item).
 
@@ -115,7 +124,7 @@ uptake is nascent. Current state (2026-08-05 survey):
 | **exegesis** | transitive only (via skillet) |
 | **skillsaw**, **adh** | not adopted (adh re-exports `skillet/errs.Error` as `adh.Error`) |
 
-- [ ] **Publish a consumer-side `wrapcheck` snippet.** Every repo that adopts toerr must
+- [x] **Publish a consumer-side `wrapcheck` snippet.** Every repo that adopts toerr must
       whitelist `Wrap`/`WrapWithMessage`/`Mark` in its own `.golangci.yaml` (toerr's own
       config whitelists only `fmt.Errorf`; skillet already hand-registered
       `WrapWithMessage`). Shipping a documented, copy-pasteable `extra-ignore-sigs` block
@@ -124,7 +133,9 @@ uptake is nascent. Current state (2026-08-05 survey):
       the wrappers: gnosis had to register `.WithCode(` separately (2026-10-22), because a
       coded wrap keeps its cause's `Unwrap` chain and is a real wrap. Leave `.Seal(` out:
       a seal records no frame, so a bare `return errors.Seal(err)` is exactly what
-      wrapcheck should flag; `Link` or `Mark` around it records the hop.
+      wrapcheck should flag; `Link` or `Mark` around it records the hop. Done: README
+      "Linting an Adopting Project", checked against a scratch consumer module, where
+      only a bare `Seal` and a bare foreign error were still reported.
 - [ ] **Land the skillet consolidation first (skillet's call, tracked there).** The
       highest-leverage rollout is top-down: if `skillet/errs` becomes a thin layer over
       toerr, exegesis/skillsaw/adh inherit it on their next skillet bump — no per-repo
@@ -239,3 +250,13 @@ ______________________________________________________________________
       adopter has two releases of SA1019 warnings to migrate (`CHANGELOG.md` has the
       table). Delete their tests and the `TestLinkSealedCause` comparison with them in
       the same change, and say in that release's notes that a call stops compiling.
+
+______________________________________________________________________
+
+## 11. Release `errgrpc` — Low Effort, After the Next Release
+
+- [ ] Tag `errors/errgrpc/v0.1.0` after toerr v0.3.0. The module requires toerr
+      v0.3.0, which it builds against through a `replace` until then; the `replace`
+      can stay, because consumers ignore it. `bin/release.sh` tags only the root
+      module, so either tag the submodule by hand or teach the script a module path.
+      `CHANGELOG.md` has the notes for both.
