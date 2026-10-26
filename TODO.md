@@ -5,8 +5,8 @@ Outstanding items for `toerr`, in priority order. Derived from
 error-handling advice corpus). Each item notes its source finding, rough effort,
 and rationale.
 
-Resolved and therefore **not** listed: chain-severing at boundaries
-(`errcode.WithCodeOpaque`), and acknowledging the enrich-vs-log debate (README's
+Resolved and therefore **not** listed: sealing a cause at a boundary
+(`errors.Seal`, which the deprecated `errcode.WithCodeOpaque` now delegates to), and acknowledging the enrich-vs-log debate (README's
 "unsettled debate" section). Deliberately **out of scope**: namespaced/global
 domain codes (Gap 7) — a documented, intentional divergence, not a defect.
 
@@ -120,8 +120,11 @@ uptake is nascent. Current state (2026-08-05 survey):
       config whitelists only `fmt.Errorf`; skillet already hand-registered
       `WrapWithMessage`). Shipping a documented, copy-pasteable `extra-ignore-sigs` block
       (README or a `docs/` snippet) removes the main mechanical barrier to adoption.
-      Include `.WithCode(` alongside the wrappers: gnosis had to register it separately
-      (2026-10-22), because a coded wrap keeps its cause's `Unwrap` chain and is a real wrap.
+      Include `.Link(` (and the deprecated `.WithCode(` until adopters migrate) alongside
+      the wrappers: gnosis had to register `.WithCode(` separately (2026-10-22), because a
+      coded wrap keeps its cause's `Unwrap` chain and is a real wrap. Leave `.Seal(` out:
+      a seal records no frame, so a bare `return errors.Seal(err)` is exactly what
+      wrapcheck should flag; `Link` or `Mark` around it records the hop.
 - [ ] **Land the skillet consolidation first (skillet's call, tracked there).** The
       highest-leverage rollout is top-down: if `skillet/errs` becomes a thin layer over
       toerr, exegesis/skillsaw/adh inherit it on their next skillet bump — no per-repo
@@ -170,12 +173,19 @@ issues surfaced, in priority order.
       frame; `WithCode` and `WithCodeOpaque` are documented as wraps, and their godoc
       deprecates a nil cause and warns what the flip will do. The `errhttp` example,
       test and README now use `New`. The flip is the next item.
-- [ ] **Make `WithCode` and `WithCodeOpaque` nil-in nil-out — after the deprecation
-      window.** Return nil for a nil cause, as `errors.Wrap` does. Before releasing it:
-      confirm adopters have replaced their nil-cause leaves with `errcode.New` (gnosis
-      is the known one), delete the `deprecated leaf` cases in `code_test.go` and
-      replace them with a nil-in nil-out case, and say in the release notes that an
-      unmigrated leaf would report success on its failure path.
+- [x] **Make `WithCode` and `WithCodeOpaque` nil-in nil-out — superseded (2026-10-26).**
+      Flipping an existing function would have made every unmigrated nil-cause leaf
+      report success on its failure path, the silent failure toerr exists to prevent.
+      The new behaviour got new names instead: `errcode.Link(code, message, err)` is the
+      nil-in nil-out coded wrap, and `errors.Seal(err)` hides a cause from matching while
+      keeping its text, frames, and attributes for operators (Seal is the opposite of
+      `Mark`, so it lives in the root package and serves sentinels too). `WithCode` and
+      `WithCodeOpaque` carry `Deprecated:` paragraphs, so staticcheck's SA1019 drives
+      migration, and they keep their behaviour for good; `WithCodeOpaque` delegates to
+      `Seal`, so it now keeps the operator view too. Pinned by `TestLinkSealedCause`,
+      `TestSealingTheResultHidesTheCode`, `TestSealBlocksMatching`, and the
+      `TestSealHidesEverythingBeneathFromMatching` / `TestSealKeepsTheOperatorView`
+      properties.
 - [x] **Decide what `errcode.Message` returns for classify-only wraps — Medium Impact,
       Low Effort.** `Message` reads only the *outermost* coded error. Attaching a code
       to an existing error is naturally written `WithCode(code, "", err)`, and that
