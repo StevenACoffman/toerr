@@ -63,8 +63,8 @@ adds four things the standard library leaves out:
 - `New`, `Wrap`, and `Wrapf` **record where they were called** (file, line,
   function), so the message can say what was being attempted and leave the
   location to the library.
-- Both accept trailing `slog.Attr` values, so an error carries **structured
-  context** for logging, not just a string.
+- `New`, `Wrap`, and `WrapWithMessage` accept trailing `slog.Attr` values, so an
+  error carries **structured context** for logging, not just a string.
 - `Mark` / `AsType` let you **tag an error for control flow** by type, and `Seal`
   **hides an error from matching** without hiding it from operators.
 - Errors render a **return trace** under `%+v`, and `errors.LogValue` /
@@ -75,6 +75,28 @@ import errors "github.com/StevenACoffman/toerr/errors"
 ```
 
 The rest of this guide uses that package.
+
+## Classifying an Error: a Code or Nothing
+
+Most errors need no classification. The edge logs them and answers with a generic
+failure, and nothing in between branches on what kind of failure it was. Create those
+with `errors.New`, and wrap them with `errors.Wrapf` or `errors.Wrap`.
+
+When a caller or the edge must branch on the kind of failure, attach an `errcode`
+status: `errcode.New` where the failure starts, `errcode.Link` around a cause. One
+small, shared set of codes serves every package and every transport, and each code
+says whether a retry can help (see
+[Deciding Retries at a Boundary](#deciding-retries-at-a-boundary)).
+
+The sections that follow cover what to reach for when a code cannot say it:
+
+- a **sentinel**, for one well-known value a caller compares by identity
+- a **custom type**, for fields a caller reads
+- a **mark**, to give an error whose type you don't own a meaning of yours
+- a **behaviour**, for a question an error answers whatever its type
+- an **`errclass`**, for a severity that folds across a batch inside a component
+
+Each one is a name a caller couples to, so add one only when a caller needs it.
 
 ## Sentinel Errors: Comparing Identity with `errors.Is`
 
@@ -169,8 +191,15 @@ A sentinel works as a marker too: `errors.Mark(err, ErrQuota)` makes
 `Mark` is for errors whose type you do not own. When you construct the type
 yourself, give it an `Unwrap` or `Is` method that returns your sentinel instead.
 
-Prefer a custom type or a mark when callers must *branch on a category*; prefer a
-sentinel when they match a single well-known value.
+Prefer a custom type or a mark when callers must *branch on a category* that a code
+cannot name. Prefer a sentinel when they match a single well-known value.
+
+The `StatusCode` field in `APIError` stands for an *upstream* API status,
+illustrative structured data, not this service's own transport status.
+Do not bake your own HTTP or gRPC status into an error type; carry it as a domain
+code and map it at the edge (see
+[Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
+For most application errors a code is simpler than a bespoke struct.
 
 ### Seal: the Opposite of a Mark
 
@@ -191,13 +220,6 @@ if errors.Is(err, sql.ErrNoRows) {
 **Seal the cause, not the result.** `errors.Seal(errors.Mark(err, ErrNotFound))` hides
 the sentinel you just attached, and `errors.Seal(errcode.Link(…))` hides the code. A
 seal records no frame of its own: the wrap or mark around it records the location.
-
-One caveat on the example above: `StatusCode` stands for an *upstream* API status,
-illustrative structured data, not this service's own transport status.
-Do not bake your own HTTP or gRPC status into an error type; carry it as a domain
-code and map it at the edge (see
-[Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
-For most application errors a code is simpler than a bespoke struct.
 
 ## React by Behavior: Asking an Error a Question with `AsBehavior`
 
@@ -236,7 +258,9 @@ to stay decoupled from its type. Prefer a sentinel for a single well-known value
 code (`errcode`) for a category the application branches on, and `errclass` for a
 coarse transient-vs-persistent severity that folds across joins. Keep behavior
 interfaces small and their meaning crisp: the standard library deprecated
-`net.Error.Temporary()` precisely because its meaning was ambiguous.
+`net.Error.Temporary()` precisely because its meaning was ambiguous. A behaviour
+answers anywhere in the chain, so judge it again where an error leaves your component
+(see [Deciding Retries at a Boundary](#deciding-retries-at-a-boundary)).
 
 ## Wrapping for Context, and What `%w` Leaves Out
 
@@ -525,8 +549,8 @@ message. Without one, it renders as its code in words (`not found`), and the use
 sees only the transport's generic text.
 
 `WithCode` and `WithCodeOpaque` are deprecated spellings of `Link` and of `Link` over a
-sealed cause. They keep their behaviour, including a coded leaf for a nil cause, so an
-existing call never changes meaning.
+sealed cause. Until their removal in the first release after v0.4.0, they behave as
+they always have, so a nil cause still gives a coded leaf.
 
 At the edge of the program, read the code back and map it to the transport,
 without knowing anything about the concrete error type:
@@ -538,12 +562,42 @@ func writeError(w http.ResponseWriter, err error) {
 }
 ```
 
-The domain code lives in `errcode`; the HTTP mapping lives in the `errhttp`
-adapter. `errcode` imports no transport package, so the same coded error serves
-HTTP, gRPC, or a CLI unchanged, each transport gets its own thin adapter.
+The domain code lives in `errcode`. The HTTP mapping lives in the `errhttp` adapter,
+and the gRPC mapping in `errgrpc`, a module of its own that also maps a client call's
+code back into the domain. `errcode` imports no transport package, so the same coded
+error serves HTTP, gRPC, or a CLI unchanged, and each transport gets its own thin
+adapter.
 
-Keeping the transport mapping at the boundary means the same error works
-unchanged whether it surfaces over HTTP, gRPC, or a CLI.
+Say in each exported function's godoc which codes and sentinels it returns. It is the
+part of the contract that Go's `error` type leaves out of the signature. Within this
+repository, every switch on `errcode.StatusCode` omits its default arm, so the
+`exhaustive` linter (with `default-signifies-exhaustive`) fails the build until a
+new code is handled. Do the same in your own switches.
+
+### Deciding Retries at a Boundary
+
+At a boundary, decide whether to retry from `errcode.Status` alone. Each code's godoc
+says whether a retry can help:
+
+- `StatusUnavailable`: retry with backoff, if the operation is idempotent.
+- `StatusResourceExhausted`: retry after backoff.
+- `StatusAborted`: retry the whole read-modify-write, not the last step.
+- `StatusDeadlineExceeded`: the operation may have completed, so retry only an
+  idempotent one.
+- Every other code: the same request fails the same way until something else
+  changes, such as the input, the system's state, or the code.
+
+`errclass` and behaviour interfaces such as `Retryable()` answer the same question
+inside a component. They match anywhere in the chain, and that is the hazard at a
+boundary. A database error that answers `Retryable() == true` still answers through a
+plain `Link`, even when the outer operation charged a card and cannot be repeated. A
+retryable cause doesn't make the operation retryable. Judge retryability where the
+error leaves the component. Give it the code that is true of the operation, and seal
+the cause so that nothing beneath the seal answers for it.
+
+Don't let `StatusInternal` become the code for everything unclassified. It says an
+invariant broke, which no retry fixes. When a dependency was down, say
+`StatusUnavailable`, so callers can tell a bug from an outage.
 
 ### Three Audiences, Three Views
 
@@ -556,6 +610,18 @@ one:
   `cmp.Or(errcode.Message(err), "something went wrong")`.
 - The **operator** gets the full detail and return trace: `fmt.Sprintf("%+v", err)`
   in a log.
+
+Keep the code and the message in agreement. `Status` reads the outermost code, and
+`Message` the outermost non-empty message, so a wrap that changes the code without a
+message of its own still shows the message beneath it. This answers a 500 that says
+"Seat not found.":
+
+```go
+errcode.Link(errcode.StatusInternal, "", errcode.New(errcode.StatusNotFound, "Seat not found."))
+```
+
+A wrap that changes the code should supply its own message, or seal the cause, which
+hides the inner message too.
 
 The one rule that ties them together is a security boundary: **never show
 `err.Error()` or `%+v` to an end user.** Those are the operator view and may
@@ -731,17 +797,14 @@ on the way up.
 graph TD
     A[Working with an error] --> B{Creating one<br/>or reacting to one?}
     B -->|creating| C{How many failures?}
-    C -->|several independent| D[errors.Join<br/>callers still walk them with errors.Is]
-    C -->|one| E{Will callers branch on it?}
-    E -->|match a known value| F[Sentinel<br/>var ErrX = sentinel.New]
-    E -->|read fields / branch by type| G[Custom type, errcode.Link,<br/>or errors.Mark]
-    E -->|just report it| H[errors.New]
-    B -->|reacting| I{What do you need?}
-    I -->|compare identity| J[errors.Is]
-    I -->|pull out a typed value| K[errors.As]
-    I -->|yes/no on a type| L[errors.AsType]
-    I -->|ask a behavior| N[errors.AsBehavior]
-    I -->|add context, pass up| M[errors.Wrap /<br/>errors.WrapWithMessage]
+    C -->|several independent| D[errors.Join]
+    C -->|one| E{Will a caller or the edge<br/>branch on its kind?}
+    E -->|no| F[errors.New, or errors.Wrapf<br/>around a cause]
+    E -->|yes| G[errcode.New, or errcode.Link<br/>around a cause]
+    G -.a code cannot say it.-> H[a sentinel, a custom type,<br/>or errors.Mark]
+    B -->|reacting| I{Where?}
+    I -->|at a boundary| J[errcode.Status and Message,<br/>mapped by errhttp or errgrpc]
+    I -->|inside a component| K[errors.Is, errors.AsType,<br/>or errors.AsBehavior]
 ```
 
 ## Best Practices Summary
@@ -756,8 +819,10 @@ graph TD
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
     or sentinels at the boundary, sealing the cause with `errors.Seal`. Do not let
     them leak to callers.
-05. Use a sentinel for identity, a custom type / mark / `errcode` for structured
-    data, and `errors.Join` for independent failures collected together.
+05. Attach an `errcode` status when a caller or the edge branches on the kind of
+    failure, and leave other errors unclassified. Reach for a sentinel, a custom type,
+    a mark, a behaviour, or `errclass` only when a code cannot say it. Use
+    `errors.Join` for independent failures collected together.
 06. Keep structured context in `slog.Attr` values on the error; keep the message
     clean. Log once with `errors.Attrs` + `LogAttrs`.
 07. Map domain codes to a transport (HTTP status) only at the edge, never inside
@@ -770,6 +835,10 @@ graph TD
 10. Never return `(nil, nil)` from a single-entity lookup: a missing entity is a
     not-found error, not a nil result.
 11. Keep messages lowercase and free of trailing punctuation.
+12. Decide retries from `errcode.Status` at a boundary, and seal or reclassify a cause
+    whose retryability doesn't carry over to the outer operation.
+13. Document which codes and sentinels each exported function returns, and keep a
+    wrap's code and message in agreement.
 
 ## The Packages in This Repository
 
@@ -778,12 +847,14 @@ graph TD
   `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
   renders a return trace under `%+v`.
 - `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.
-- `errcode`: transport-neutral status codes (`New`, `Link`, `Code`, `Status`,
-  `Message`). No transport concern lives here.
+- `errcode`: transport-neutral status codes, the gRPC canonical set apart from OK
+  (`New`, `Link`, `Code`, `Status`, `Message`). No transport concern lives here.
 - `errhttp`: the HTTP adapter for `errcode`: `Status`, `StatusMessage`, and
   `Error(err)` map a domain code to an HTTP status at the boundary.
-- `errclass`: coarse severity classification (`Transient`, `Persistent`) that
-  folds correctly across joined errors.
+- `errgrpc`: the gRPC adapter for `errcode`, a module of its own: `Error(err)` for a
+  handler to return, and `FromCode` for an error a client call returned.
+- `errclass`: coarse severity classification (`Transient`, `Persistent`, `Panic`)
+  for decisions inside a component. It folds correctly across joined errors.
 
 ## Deliberate Non-Choices
 
@@ -809,8 +880,8 @@ aside to keep the surface small and the behavior predictable.
   adds a frame with no message at all, so the callback form added surface for a
   micro-optimization that rarely pays off.
 - **No transport knowledge in `errcode`.** Codes are transport-neutral; the HTTP
-  mapping lives in the `errhttp` adapter, so one coded error serves HTTP, gRPC, or a
-  CLI (see
+  and gRPC mappings live in the `errhttp` and `errgrpc` adapters, so one coded error
+  serves HTTP, gRPC, or a CLI (see
   [Domain Codes and Boundary Translation](#domain-codes-and-boundary-translation)).
 - **No domain vocabulary in the library.** The library owns the mechanism; your
   application owns the meaning, its sentinels, its reading of each code, and its
