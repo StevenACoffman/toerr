@@ -1,0 +1,47 @@
+name: errgrpc
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - main
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: "-trimpath"
+jobs:
+  errgrpc:
+    # errors/errgrpc is a module of its own, so the root `go test ./...` and `golangci-lint
+    # run ./...` never reach it. It builds against the working tree through a replace, so
+    # an errcode change that breaks it fails here, on the pull request that made it.
+    name: Test and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: errors/errgrpc
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: "false"
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with:
+        go-version: "1.27"
+        cache-dependency-path: errors/errgrpc/go.sum
+    - name: Test
+      run: go test -race ./...
+    - name: Check the module is tidy
+      run: |
+        go mod tidy
+        git diff --exit-code -- go.mod go.sum
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      with:
+        version: latest
+        working-directory: errors/errgrpc
+        args: '--timeout 5m'
