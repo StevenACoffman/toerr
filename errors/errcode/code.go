@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/internal/trace"
 )
 
@@ -88,51 +89,52 @@ func (c StatusCode) String() string {
 }
 
 // New creates a leaf error carrying code and a user-facing message, and records
-// this call site. Use it where a failure is first understood; use [WithCode] to
+// this call site. Use it where a failure is first understood; use [Link] to
 // attach a code to an error that already exists. Error() returns message, or
 // "error: <code>" when message is empty.
 func New(code StatusCode, message string) error {
 	return &withCodeError{code: code, message: message, pc: trace.CallerPC()}
 }
 
-// WithCode attaches a status code (and optional user-visible message) to cause,
-// and records this call site.
+// Link attaches a status code (and optional user-facing message) to err, and
+// records this call site. Returns nil if err is nil, as errors.Wrap does.
 //
-// WithCode is a wrap. A nil cause still yields a coded leaf, for compatibility,
-// but that use is deprecated: call [New] instead. A future release will make
-// WithCode return nil for a nil cause, as errors.Wrap does, so that a wrap needs
-// no nil check of its own. Replace every nil-cause call with New before taking
-// that release: after it, such a call returns nil and reports success on a
-// failure path.
+// err stays in the Unwrap chain, so callers can still errors.Is/As into it. That
+// suits an error of your own. Where err is a dependency's error that callers must
+// not couple to, seal it first, so callers match only the code:
 //
-// The cause stays in the Unwrap chain, so callers can still errors.Is/As into it.
-// That is the %w-style contract: convenient when the cause is your own error, but
-// at a boundary it lets callers couple to a dependency's error types. To sever the
-// chain there, use [WithCodeOpaque].
+//	errcode.Link(code, message, errors.Seal(err))
+//
+// Seal the cause, not the result: errors.Seal(errcode.Link(…)) hides this code too.
+func Link(code StatusCode, message string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &withCodeError{code: code, message: message, cause: err, pc: trace.CallerPC()}
+}
+
+// WithCode attaches a status code (and optional user-facing message) to cause, and
+// records this call site. A nil cause yields a coded leaf.
+//
+// Deprecated: Use [Link], which returns nil for a nil cause, or [New] for a leaf.
+// WithCode keeps its behaviour, so an existing call never changes meaning.
 func WithCode(code StatusCode, message string, cause error) error {
 	return &withCodeError{code: code, message: message, cause: cause, pc: trace.CallerPC()}
 }
 
-// WithCodeOpaque is like [WithCode] but severs the chain: the cause's message is
-// preserved in the error text (for operators and logs) yet the cause itself is no
-// longer reachable via errors.Is, errors.As, or Unwrap.
+// WithCodeOpaque is [WithCode] with cause sealed by errors.Seal: callers match the
+// code but not the cause, and operators still see the cause's text, trace, and
+// attributes. A nil cause yields a coded leaf.
 //
-// Use it at a boundary to translate a dependency's error into a domain code without
-// letting callers couple to that dependency's error types. This is the %v-style
-// translation from error_translation.md: after WithCodeOpaque, switching your
-// storage engine cannot break a caller who matched on sql.ErrNoRows, because the
-// match never succeeds. The user-facing Message and the domain Status are
-// unaffected.
-//
-// As with WithCode, a nil cause is deprecated; call [New] for a leaf.
+// Deprecated: Use [Link] with errors.Seal, as in
+// errcode.Link(code, message, errors.Seal(err)), or [New] for a leaf.
 func WithCodeOpaque(code StatusCode, message string, cause error) error {
-	e := &withCodeError{code: code, message: message, pc: trace.CallerPC()}
-	if cause != nil {
-		// Flatten to a plain string error: the text survives in Error()/%+v, but
-		// the original type and identity are gone, so errors.Is/As cannot reach it.
-		e.cause = errors.New(cause.Error())
+	return &withCodeError{
+		code:    code,
+		message: message,
+		cause:   toerr.Seal(cause),
+		pc:      trace.CallerPC(),
 	}
-	return e
 }
 
 // Code returns [Status] and [Message] together.
@@ -162,9 +164,9 @@ func Status(err error) StatusCode {
 // cmp.Or) — never fall back to err.Error().
 //
 // It reads the outermost coded error that has a message. A coded wrap without one,
-// such as WithCode(code, "", err), only reclassifies, so it leaves the message
-// beneath it visible; an outer message still replaces an inner one. WithCodeOpaque
-// severs its cause, and with it any message the cause carried.
+// such as Link(code, "", err), only reclassifies, so it leaves the message
+// beneath it visible; an outer message still replaces an inner one. A sealed cause
+// (errors.Seal) hides any message it carried.
 func Message(err error) string {
 	var wc *withCodeError
 	if !errors.As(err, &wc) {

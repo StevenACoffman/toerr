@@ -3,6 +3,7 @@ package errcode_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 func TestCodeRoundTrip(t *testing.T) {
 	cause := errors.New("sql: no rows")
-	err := errcode.WithCode(errcode.StatusNotFound, "user not found", cause)
+	err := errcode.Link(errcode.StatusNotFound, "user not found", cause)
 
 	code, msg := errcode.Code(err)
 	if code != errcode.StatusNotFound {
@@ -32,7 +33,7 @@ func TestCodeRoundTrip(t *testing.T) {
 // Code answers what Status and Message answer: the outermost code, which a wrap may
 // change, and the outermost message, which a wrap without one leaves alone.
 func TestCodeAgreesWithStatusAndMessage(t *testing.T) {
-	err := errcode.WithCode(
+	err := errcode.Link(
 		errcode.StatusInvalidArgument,
 		"",
 		errcode.New(errcode.StatusNotFound, "no such user"),
@@ -62,7 +63,7 @@ func TestErrorMessage(t *testing.T) {
 		want string
 	}{
 		"message and cause": {
-			errcode.WithCode(errcode.StatusInternal, "boom", errors.New("root")),
+			errcode.Link(errcode.StatusInternal, "boom", errors.New("root")),
 			"root (boom)",
 		},
 		"leaf": {errcode.New(errcode.StatusInternal, "boom"), "boom"},
@@ -71,10 +72,10 @@ func TestErrorMessage(t *testing.T) {
 			"error: not_found",
 		},
 		"cause only": {
-			errcode.WithCode(errcode.StatusInternal, "", errors.New("root")),
+			errcode.Link(errcode.StatusInternal, "", errors.New("root")),
 			"root",
 		},
-		// The deprecated leaf spelling, pinned until WithCode becomes nil-in nil-out.
+		// The deprecated leaf spelling keeps its meaning for good.
 		"deprecated leaf": {errcode.WithCode(errcode.StatusInternal, "boom", nil), "boom"},
 		"deprecated leaf without message": {
 			errcode.WithCode(errcode.StatusNotFound, "", nil),
@@ -99,10 +100,10 @@ func TestMessage(t *testing.T) {
 			errcode.New(errcode.StatusNotFound, "user not found"),
 			"user not found",
 		},
-		"empty message": {errcode.WithCode(errcode.StatusInternal, "", errors.New("boom")), ""},
+		"empty message": {errcode.Link(errcode.StatusInternal, "", errors.New("boom")), ""},
 		// A coded wrap without a message only reclassifies; the message beneath shows.
 		"classify-only wrap": {
-			errcode.WithCode(
+			errcode.Link(
 				errcode.StatusInvalidArgument,
 				"",
 				errcode.New(errcode.StatusNotFound, "no such user"),
@@ -111,7 +112,7 @@ func TestMessage(t *testing.T) {
 		},
 		"classify-only wrap under a plain wrap": {
 			toerr.WrapWithMessage(
-				errcode.WithCode(
+				errcode.Link(
 					errcode.StatusInvalidArgument,
 					"",
 					errcode.New(errcode.StatusNotFound, "no such user"),
@@ -121,15 +122,23 @@ func TestMessage(t *testing.T) {
 			"no such user",
 		},
 		"outer message wins": {
-			errcode.WithCode(
+			errcode.Link(
 				errcode.StatusInternal,
 				"try again later",
 				errcode.New(errcode.StatusNotFound, "no such user"),
 			),
 			"try again later",
 		},
-		// Severing flattens the cause to text, so its message goes with its identity.
-		"opaque severs the message beneath": {
+		// A seal hides the message beneath it along with everything else callers match.
+		"sealed cause hides the message beneath": {
+			errcode.Link(
+				errcode.StatusInternal,
+				"",
+				toerr.Seal(errcode.New(errcode.StatusNotFound, "no such user")),
+			),
+			"",
+		},
+		"deprecated opaque hides the message beneath": {
 			errcode.WithCodeOpaque(
 				errcode.StatusInternal,
 				"",
@@ -149,28 +158,70 @@ func TestMessage(t *testing.T) {
 	}
 }
 
-func TestWithCodeOpaqueSeversChain(t *testing.T) {
-	cause := errors.New("sql: no rows in result set")
+func TestLinkNil(t *testing.T) {
+	if err := errcode.Link(errcode.StatusInternal, "boom", nil); err != nil {
+		t.Errorf("Link(…, nil) = %v, want nil", err)
+	}
+}
 
-	// WithCode keeps the cause reachable.
-	transparent := errcode.WithCode(errcode.StatusNotFound, "user not found", cause)
-	if !errors.Is(transparent, cause) {
-		t.Error("WithCode should keep the cause in the chain")
+// A sealed cause is how a dependency's error becomes a domain code: callers match
+// the code and nothing beneath it, while operators keep the whole chain. Each case
+// builds the same failure; the deprecated WithCodeOpaque must agree with Link and
+// Seal in everything but its spelling.
+func TestLinkSealedCause(t *testing.T) {
+	dependency := errors.New("sql: no rows in result set")
+	cases := map[string]func(cause error) error{
+		"Link and Seal": func(cause error) error {
+			return errcode.Link(errcode.StatusNotFound, "user not found", toerr.Seal(cause))
+		},
+		"deprecated WithCodeOpaque": func(cause error) error {
+			return errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", cause)
+		},
 	}
+	// view is everything each audience observes about one error.
+	type view struct {
+		ReachesDependency bool
+		Status            errcode.StatusCode
+		Message, Text     string
+		Attrs             string
+		Frames            int
+	}
+	want := view{
+		Status:  errcode.StatusNotFound,
+		Message: "user not found",
+		Text:    "query: sql: no rows in result set (user not found)",
+		Attrs:   "[shard=7]",
+		Frames:  2, // the cause's and the boundary's
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := build(toerr.WrapWithMessage(dependency, "query", slog.Int("shard", 7)))
+			trace := fmt.Sprintf("%+v", err)
+			got := view{
+				ReachesDependency: errors.Is(err, dependency),
+				Status:            errcode.Status(err),
+				Message:           errcode.Message(err),
+				Text:              err.Error(),
+				Attrs:             fmt.Sprint(toerr.Attrs(err)),
+				Frames:            strings.Count(trace, "code_test.go:"),
+			}
+			if got != want {
+				t.Errorf("got  %+v\nwant %+v\n%s", got, want, trace)
+			}
+		})
+	}
+}
 
-	// WithCodeOpaque severs it, while code, message, and operator text survive.
-	opaque := errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", cause)
-	if errors.Is(opaque, cause) {
-		t.Error("WithCodeOpaque should sever the cause from errors.Is")
+// Sealing the result instead of the cause hides the code just attached. This pins
+// the mistake the Link and Seal docs warn about, so a change to it is deliberate.
+func TestSealingTheResultHidesTheCode(t *testing.T) {
+	err := toerr.Seal(errcode.Link(errcode.StatusNotFound, "user not found", errors.New("boom")))
+
+	if errcode.Status(err) != errcode.StatusUnknown {
+		t.Errorf("Status = %v, want StatusUnknown", errcode.Status(err))
 	}
-	if errcode.Status(opaque) != errcode.StatusNotFound {
-		t.Errorf("Status = %v, want StatusNotFound", errcode.Status(opaque))
-	}
-	if errcode.Message(opaque) != "user not found" {
-		t.Errorf("Message = %q, want %q", errcode.Message(opaque), "user not found")
-	}
-	if got, want := opaque.Error(), "sql: no rows in result set (user not found)"; got != want {
-		t.Errorf("Error() = %q, want %q", got, want)
+	if errcode.Message(err) != "" {
+		t.Errorf("Message = %q, want empty", errcode.Message(err))
 	}
 }
 
@@ -205,13 +256,13 @@ func TestACodedErrorContributesItsCallSite(t *testing.T) {
 			2,
 		},
 		"coded wrap": {
-			errcode.WithCode(errcode.StatusInternal, "", toerr.New("disk full")),
+			errcode.Link(errcode.StatusInternal, "", toerr.New("disk full")),
 			2,
 		},
-		// Severing flattens the cause to text, frames included; the boundary keeps one.
-		"opaque": {
-			errcode.WithCodeOpaque(errcode.StatusInternal, "", toerr.New("disk full")),
-			1,
+		// A seal keeps the frames beneath it for operators.
+		"sealed cause": {
+			errcode.Link(errcode.StatusInternal, "", toerr.Seal(toerr.New("disk full"))),
+			2,
 		},
 	}
 	for name, tc := range cases {

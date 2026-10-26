@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errcode"
 )
 
@@ -19,31 +20,30 @@ func BenchmarkNew(b *testing.B) {
 	}
 }
 
-func BenchmarkWithCode(b *testing.B) {
+func BenchmarkLink(b *testing.B) {
 	cause := errors.New("boom")
 	for b.Loop() {
-		errSink = errcode.WithCode(errcode.StatusNotFound, "not found", cause)
+		errSink = errcode.Link(errcode.StatusNotFound, "not found", cause)
 	}
 }
 
-// WithCodeOpaque copies the cause's text into a fresh error, so it allocates more than
-// WithCode; the gap is the price of severing the chain.
-func BenchmarkWithCodeOpaque(b *testing.B) {
+// Sealing the cause adds one small allocation and no frame to Link.
+func BenchmarkLinkSealed(b *testing.B) {
 	cause := errors.New("boom")
 	for b.Loop() {
-		errSink = errcode.WithCodeOpaque(errcode.StatusNotFound, "not found", cause)
+		errSink = errcode.Link(errcode.StatusNotFound, "not found", toerr.Seal(cause))
 	}
 }
 
 func BenchmarkCode(b *testing.B) {
-	err := errcode.WithCode(errcode.StatusNotFound, "not found", errors.New("boom"))
+	err := errcode.Link(errcode.StatusNotFound, "not found", errors.New("boom"))
 	for b.Loop() {
 		benchCode, benchMsg = errcode.Code(err)
 	}
 }
 
 func BenchmarkError(b *testing.B) {
-	err := errcode.WithCode(errcode.StatusNotFound, "not found", errors.New("boom"))
+	err := errcode.Link(errcode.StatusNotFound, "not found", errors.New("boom"))
 	for b.Loop() {
 		benchMsg = err.Error()
 	}

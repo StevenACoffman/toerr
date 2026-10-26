@@ -14,7 +14,7 @@ var (
 )
 
 func BenchmarkError(b *testing.B) {
-	err := errcode.WithCode(errcode.StatusNotFound, "", errors.New("boom"))
+	err := errcode.Link(errcode.StatusNotFound, "", errors.New("boom"))
 	for b.Loop() {
 		benchStatus, benchMsg = errhttp.Error(err)
 	}

@@ -4,10 +4,9 @@
 // adapter such as errhttp. Message returns the client-safe text; unlike
 // err.Error() it never exposes wrapped internal detail.
 //
-// New makes a coded leaf. WithCode keeps the cause in the Unwrap chain (callers
-// can errors.Is/As into it); WithCodeOpaque severs it, translating a dependency's error into a
-// domain code
-// without letting callers couple to the dependency's error types. Every
-// constructor records its call site, so a coded error is a frame in the %+v
+// New makes a coded leaf. Link attaches a code to an existing error and keeps it in
+// the Unwrap chain, so callers can errors.Is/As into it; seal a dependency's error
+// first (Link(code, message, errors.Seal(err))) so callers match only the code.
+// Every constructor records its call site, so a coded error is a frame in the %+v
 // return trace.
 package errcode
