@@ -26,7 +26,8 @@ never exposes the wrapped internal detail that `err.Error()` would.
   switching a dependency cannot break a caller who matched on, say, `sql.ErrNoRows`.
   Seal the cause, not the result: a seal around `Link` hides the code too.
 - `errcode.WithCode` and `errcode.WithCodeOpaque` are deprecated spellings of the
-  two above. They keep their behaviour, including a coded leaf for a nil cause.
+  two above. They keep their behaviour, including a coded leaf for a nil cause,
+  until they are removed in the first release after v0.4.0.
 - Every constructor records its call site, so a coded error appears in the
   `%+v` return trace like any other hop.
 - `errcode.Status(err) StatusCode`: the outermost code, or `StatusUnknown` if none.

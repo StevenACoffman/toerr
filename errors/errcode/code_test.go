@@ -83,7 +83,7 @@ func TestErrorMessage(t *testing.T) {
 			errcode.Link(errcode.StatusInternal, "", errors.New("root")),
 			"root",
 		},
-		// The deprecated leaf spelling keeps its meaning for good.
+		// The deprecated leaf spelling keeps its meaning until it is removed.
 		"deprecated leaf": {errcode.WithCode(errcode.StatusInternal, "boom", nil), "boom"},
 		"deprecated leaf without message": {
 			errcode.WithCode(errcode.StatusNotFound, "", nil),

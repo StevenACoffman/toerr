@@ -162,7 +162,8 @@ func Link(code StatusCode, message string, err error) error {
 // records this call site. A nil cause yields a coded leaf.
 //
 // Deprecated: Use [Link], which returns nil for a nil cause, or [New] for a leaf.
-// WithCode keeps its behaviour, so an existing call never changes meaning.
+// WithCode keeps its behaviour until it is removed in the first release after
+// v0.4.0, so an existing call never changes meaning; it stops compiling instead.
 func WithCode(code StatusCode, message string, cause error) error {
 	return &withCodeError{code: code, message: message, cause: cause, pc: trace.CallerPC()}
 }
@@ -172,7 +173,8 @@ func WithCode(code StatusCode, message string, cause error) error {
 // attributes. A nil cause yields a coded leaf.
 //
 // Deprecated: Use [Link] with errors.Seal, as in
-// errcode.Link(code, message, errors.Seal(err)), or [New] for a leaf.
+// errcode.Link(code, message, errors.Seal(err)), or [New] for a leaf. It is removed
+// in the first release after v0.4.0.
 func WithCodeOpaque(code StatusCode, message string, cause error) error {
 	return &withCodeError{
 		code:    code,

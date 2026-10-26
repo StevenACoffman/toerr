@@ -181,7 +181,7 @@ issues surfaced, in priority order.
       keeping its text, frames, and attributes for operators (Seal is the opposite of
       `Mark`, so it lives in the root package and serves sentinels too). `WithCode` and
       `WithCodeOpaque` carry `Deprecated:` paragraphs, so staticcheck's SA1019 drives
-      migration, and they keep their behaviour for good; `WithCodeOpaque` delegates to
+      migration, and they keep their behaviour until their removal (item 10); `WithCodeOpaque` delegates to
       `Seal`, so it now keeps the operator view too. Pinned by `TestLinkSealedCause`,
       `TestSealingTheResultHidesTheCode`, `TestSealBlocksMatching`, and the
       `TestSealHidesEverythingBeneathFromMatching` / `TestSealKeepsTheOperatorView`
@@ -229,3 +229,13 @@ issues surfaced, in priority order.
       re-proposed.
 - Source: gnosis PLAN.md §6.60 and TODO.md (the `errs.Error` retirement entry and the
   open `readConcept` item); probes run 2026-10-22 against `toerr` `v0.1.0`.
+
+______________________________________________________________________
+
+## 10. Remove the Deprecated `errcode` Constructors — Scheduled, Low Effort
+
+- [ ] Delete `errcode.WithCode` and `errcode.WithCodeOpaque` in the first release after
+      v0.4.0. They are deprecated in v0.3.0 and kept, unchanged, through v0.4.0, so an
+      adopter has two releases of SA1019 warnings to migrate (`CHANGELOG.md` has the
+      table). Delete their tests and the `TestLinkSealedCause` comparison with them in
+      the same change, and say in that release's notes that a call stops compiling.
