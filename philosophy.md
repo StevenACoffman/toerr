@@ -348,9 +348,12 @@ when the bug is at that site.
 
 Intent has a home at each scope, and it is cheapest to record where it is known:
 
-- **Per request**: the request ID and the authenticated user. Attach them once, to the
-  request's context or its trace span, where the handler's logger reads them, not to
-  every wrap.
+- **Per request**: the request ID and the authenticated user, and what the request
+  found on the way, such as a cache hit. Record them once with `logctx.Add`, on the
+  request's context, and the boundary writes them with the request's one log line
+  (see [Collecting a Request's Fields](#collecting-a-requests-fields)). Don't repeat
+  them on every wrap. For a request that crosses services, put them on its trace span
+  too.
 - **Per task**: which job, shard, or item a goroutine was working on. Only the code
   that starts the task knows that, so attach it there (see
   [Errors Across Goroutines](#errors-across-goroutines)).
@@ -460,6 +463,10 @@ for n, shard := range shards {
 	})
 }
 ```
+
+The same holds for fields the task records on success. Hand the goroutine its own
+`logctx.Scope(ctx, fmt.Sprintf("shard_%d", n))`, so its fields land under that name
+and no sibling's can overwrite them.
 
 **Report why a context ended.** Work that stops on `ctx.Done()` usually returns
 `ctx.Err()`, which is `context.Canceled` or `context.DeadlineExceeded`: it says the
@@ -707,6 +714,33 @@ lives in `[]slog.Attr`, while an error's **structure** (its message, cause, and
 call site) lives in typed fields. See the README's "structure vs. context"
 section for why.
 
+### Collecting a Request's Fields
+
+An error carries what a failure knew, but a request that succeeds has no error. Fields
+such as a cache hit, a row count, or the user turn up deep in the handler on either
+path. The `logctx` package keeps them on the request's context. Install a collector
+where the request starts, add each field where the code learns it, and write one
+line when the request ends, merging in the error's own attributes if it failed:
+
+```go
+ctx = logctx.Init(ctx)
+err := next(ctx)
+
+level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+if err != nil {
+	level, msg = slog.LevelError, err.Error()
+	attrs = append(attrs, errors.Attrs(err)...)
+}
+logger.LogAttrs(ctx, level, msg, attrs...)
+```
+
+Beneath it, `logctx.Add(ctx, slog.Bool("cache_hit", true))` records a field from
+any layer. The collector is safe for the goroutines a request starts. Give each
+parallel branch its own `logctx.Scope`, so two branches' `duration` fields render as
+`shard_3.duration` and `shard_4.duration` instead of overwriting each other. Without
+`Init`, `Add` does nothing, so a library can record fields and leave the choice of
+whether to collect them to the program.
+
 ## Failure Domains
 
 A failure should cost one request or one job, not the process. That unit is the
@@ -823,8 +857,9 @@ graph TD
     failure, and leave other errors unclassified. Reach for a sentinel, a custom type,
     a mark, a behaviour, or `errclass` only when a code cannot say it. Use
     `errors.Join` for independent failures collected together.
-06. Keep structured context in `slog.Attr` values on the error; keep the message
-    clean. Log once with `errors.Attrs` + `LogAttrs`.
+06. Keep structured context in `slog.Attr` values on the error, and request-wide fields
+    in `logctx`, so the message stays clean. Log once per request, with `logctx.Attrs`,
+    `errors.Attrs`, and `LogAttrs`.
 07. Map domain codes to a transport (HTTP status) only at the edge, never inside
     the error type.
 08. `panic` on unrecoverable invariant violations instead of threading checks that
@@ -853,6 +888,8 @@ graph TD
   `Error(err)` map a domain code to an HTTP status at the boundary.
 - `errgrpc`: the gRPC adapter for `errcode`, a module of its own: `Error(err)` for a
   handler to return, and `FromCode` for an error a client call returned.
+- `logctx`: a request-scoped collector of log fields (`Init`, `Add`, `Scope`,
+  `Attrs`), for the request's one log line on the success and the failure path.
 - `errclass`: coarse severity classification (`Transient`, `Persistent`, `Panic`)
   for decisions inside a component. It folds correctly across joined errors.
 
