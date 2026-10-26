@@ -69,7 +69,15 @@ func TestErrorMessage(t *testing.T) {
 		"leaf": {errcode.New(errcode.StatusInternal, "boom"), "boom"},
 		"leaf without message": {
 			errcode.New(errcode.StatusNotFound, ""),
-			"error: not_found",
+			"not found",
+		},
+		"leaf without message, two-word code": {
+			errcode.New(errcode.StatusFailedPrecondition, ""),
+			"failed precondition",
+		},
+		"leaf without message in a chain": {
+			toerr.Wrapf(errcode.New(errcode.StatusNotFound, ""), "load seat %d", 7),
+			"load seat 7: not found",
 		},
 		"cause only": {
 			errcode.Link(errcode.StatusInternal, "", errors.New("root")),
@@ -79,7 +87,7 @@ func TestErrorMessage(t *testing.T) {
 		"deprecated leaf": {errcode.WithCode(errcode.StatusInternal, "boom", nil), "boom"},
 		"deprecated leaf without message": {
 			errcode.WithCode(errcode.StatusNotFound, "", nil),
-			"error: not_found",
+			"not found",
 		},
 	}
 	for name, tc := range cases {

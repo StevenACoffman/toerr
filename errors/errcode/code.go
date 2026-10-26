@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/internal/trace"
@@ -90,8 +91,12 @@ func (c StatusCode) String() string {
 
 // New creates a leaf error carrying code and a user-facing message, and records
 // this call site. Use it where a failure is first understood; use [Link] to
-// attach a code to an error that already exists. Error() returns message, or
-// "error: <code>" when message is empty.
+// attach a code to an error that already exists.
+//
+// Give every leaf a message. The leaf is where the failure is understood, and its
+// message is the one record of it that a user may see. Error() returns message, or
+// the code in words ("not found") when message is empty, so the operator reads at
+// least the category in the chain, as in "load seat 7: not found".
 func New(code StatusCode, message string) error {
 	return &withCodeError{code: code, message: message, pc: trace.CallerPC()}
 }
@@ -192,7 +197,7 @@ func (e *withCodeError) Error() string {
 	case e.cause != nil:
 		return e.cause.Error()
 	default:
-		return fmt.Sprintf("error: %s", e.code)
+		return strings.ReplaceAll(e.code.String(), "_", " ")
 	}
 }
 
