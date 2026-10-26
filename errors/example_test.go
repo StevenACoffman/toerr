@@ -2,6 +2,7 @@ package errors_test
 
 import (
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"testing"
@@ -10,7 +11,10 @@ import (
 	"github.com/StevenACoffman/toerr/errors/sentinel"
 )
 
-var errRateLimited = sentinel.New("rate limited")
+var (
+	errRateLimited  = sentinel.New("rate limited")
+	errUserNotFound = sentinel.New("user not found")
+)
 
 type exampleRateLimitError struct{ error }
 
@@ -27,6 +31,21 @@ func ExampleMark() {
 	_, ok := errors.AsType[*exampleRateLimitError](err)
 	fmt.Println(ok)
 	// Output: true
+}
+
+// Seal turns a dependency's error into a domain sentinel: callers match the mark
+// outside the seal and nothing inside it, while the message keeps the detail.
+func ExampleSeal() {
+	dependency := fmt.Errorf("open users.db: %w", fs.ErrNotExist)
+	err := errors.Mark(errors.Seal(dependency), errUserNotFound)
+
+	fmt.Println(errors.Is(err, errUserNotFound))
+	fmt.Println(errors.Is(err, fs.ErrNotExist))
+	fmt.Println(err)
+	// Output:
+	// true
+	// false
+	// open users.db: file does not exist
 }
 
 // Attrs collects every slog attribute along the chain, outermost first.

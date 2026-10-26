@@ -18,6 +18,19 @@ import (
 	"strings"
 )
 
+// Token is the argument type of HiddenCause. Code outside this module cannot name
+// it, so it cannot write the HiddenCause interface and reach a hidden cause through
+// it; only this module's renderer can. Reflection still can: the token keeps the
+// cause out of the ordinary API, not out of deliberate reach.
+type Token struct{}
+
+// HiddenCause is implemented by an error that keeps a cause for the operator view
+// while hiding it from Unwrap, and so from errors.Is and errors.As. The renderer
+// follows TraceCause where Unwrap stops, so the frames beneath still print.
+type HiddenCause interface {
+	TraceCause(Token) error
+}
+
 // tree represents an error and its return trace as a tree. Children are the
 // branches of a multi-error (errors.Join); a single-cause chain has none.
 type tree struct {
@@ -69,6 +82,9 @@ loop:
 				current.children = append(current.children, buildTree(e))
 			}
 			break loop
+
+		case HiddenCause:
+			err = x.TraceCause(Token{})
 
 		default:
 			break loop

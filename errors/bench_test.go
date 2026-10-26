@@ -71,6 +71,15 @@ func BenchmarkMark(b *testing.B) {
 	})
 }
 
+// BenchmarkSeal records no frame, so it costs one small allocation and no
+// runtime.Callers walk.
+func BenchmarkSeal(b *testing.B) {
+	cause := errors.New("boom")
+	for b.Loop() {
+		errSink = errors.Seal(cause)
+	}
+}
+
 // deepChain is a chain of depth wraps over a leaf, each wrap carrying one attribute,
 // with a sentinel mark halfway up.
 func deepChain(depth int) (err, marker error) {
