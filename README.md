@@ -75,6 +75,8 @@ short as `fmt.Errorf`, and every wrap also records its file, line, and function.
 - **[Structured context](#structured-attributes)**: `New`, `Wrap`, and
 `WrapWithMessage` take trailing `slog.Attr` values, surfaced at your log boundary with
 `errors.LogValue` / `errors.Attrs`.
+- **[Request fields on the success path too](#request-fields)**: `logctx` collects
+fields found anywhere in a request, on its context, for the request's one log line.
 - **[A return trace](#return-trace)** under `%+v`, not a heavyweight stack trace.
 - **[Type marks for control flow](#marks-and-astype)**: `Mark` / `AsType` tag an
 error by type without disturbing its message or `Unwrap` chain, and `Seal` does the
@@ -147,6 +149,31 @@ logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.L
 
 The reasoning behind carrying `slog.Attr` on the error is in
 [Design → Context as `slog.Attr`](#context-as-slogattr).
+
+### Request Fields
+
+Fields such as the authenticated user or a cache hit describe the whole request, and
+a request that succeeds has no error to carry them. The
+[`logctx`](errors/logctx/) package keeps them on the request's context.
+`logctx.Init` installs a collector where the request starts, `logctx.Add` records a
+field from any layer, and `logctx.Attrs` returns them all for the request's one log
+line, beside `errors.Attrs(err)` when it failed:
+
+```go
+ctx = logctx.Init(ctx)
+err := next(ctx)
+
+level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+if err != nil {
+	level, msg = slog.LevelError, err.Error()
+	attrs = append(attrs, errors.Attrs(err)...)
+}
+logger.LogAttrs(ctx, level, msg, attrs...)
+```
+
+It is safe for the goroutines a request starts. `logctx.Scope` gives each parallel
+branch a namespace of its own, so two branches' `duration` fields render as
+`shard_3.duration` and `shard_4.duration` instead of overwriting each other.
 
 ## Return Trace
 
@@ -419,7 +446,8 @@ worth knowing before you adopt it.
 - **Log once, not per layer.** Errors do not implement `slog.LogValuer`, so they do
   not auto-expand when logged. Log the error once, at a single top-level handler,
   with `errors.Attrs` / `errors.LogValue`. Lower layers wrap (for location) and
-  return, not log.
+  return, not log. A field a lower layer wants in that line goes to `logctx.Add`,
+  which is how a canonical log line gets built without a log call per layer.
 - **Do not leak dependencies at boundaries.** `errcode.Link` keeps the cause
   matchable; `errors.Seal` the cause first when translating a dependency error you do
   not want callers coupling to.
@@ -481,6 +509,7 @@ hop with no location, which is what `wrapcheck` should report; wrap it with `Lin
 | `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).                   |
 | `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                          |
 | `errgrpc`  | gRPC adapter for `errcode`, in both directions. A module of its own.                       |
+| `logctx`   | Request-scoped log fields for the request's one log line, on success and failure.          |
 | `errclass` | Coarse severity classification that folds across joined errors.                            |
 
 Each subpackage has its own README:
@@ -490,6 +519,7 @@ Each subpackage has its own README:
 - [`errhttp`](errors/errhttp/): map a coded error to an HTTP status and safe message.
 - [`errgrpc`](errors/errgrpc/): map a coded error to a gRPC status, and a client
   call's code back to a domain code.
+- [`logctx`](errors/logctx/): collect a request's log fields and write them once.
 - [`errclass`](errors/errclass/): classify error severity for retry decisions.
 
 ## Prior Art
