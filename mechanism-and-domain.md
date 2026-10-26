@@ -62,11 +62,11 @@ Translate and code at the boundary, in terms your domain defines:
 func (s *Store) ReserveSeat(ctx context.Context, id int) error {
 	if err := s.insert(ctx, id); err != nil {
 		if isUniqueViolation(err) {
-			// external error -> domain condition -> transport-neutral code + message
-			return errcode.WithCode(errcode.StatusAlreadyExists,
-				"that seat is already taken", errors.Wrap(err))
+			// external error -> sealed -> transport-neutral code + message
+			return errcode.Link(errcode.StatusAlreadyExists,
+				"that seat is already taken", errors.Seal(err))
 		}
-		return errcode.WithCode(errcode.StatusInternal, "", errors.Wrap(err))
+		return errcode.Link(errcode.StatusInternal, "", err)
 	}
 	return nil
 }
@@ -85,7 +85,7 @@ category the generic set does not capture, do not stretch a status to fit; name 
 with a domain sentinel or a `Mark`, which live in your package and mean exactly
 what you say they mean.
 
-A fully domain-owned code *type*, a generic `WithCode[C]` parameterized over your
+A fully domain-owned code *type*, a generic `Link[C]` parameterized over your
 own `Code` type, is also possible but rarely worth it. It costs a type
 parameter at every extraction site (`Status[myapp.Code](err)`, which fails silently
 if you name the wrong type) and forfeits the ready-made `errhttp` adapter, since the

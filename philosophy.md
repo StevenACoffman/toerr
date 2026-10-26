@@ -63,7 +63,8 @@ adds four things the standard library leaves out:
 - `New` and `Wrap` **record where they were called** (file, line, function).
 - Both accept trailing `slog.Attr` values, so an error carries **structured
   context** for logging, not just a string.
-- `Mark` / `AsType` let you **tag an error for control flow** by type.
+- `Mark` / `AsType` let you **tag an error for control flow** by type, and `Seal`
+  **hides an error from matching** without hiding it from operators.
 - Errors render a **return trace** under `%+v`, and `errors.LogValue` /
   `errors.Attrs` turn one into structured log fields at your log boundary.
 
@@ -168,6 +169,26 @@ yourself, give it an `Unwrap` or `Is` method that returns your sentinel instead.
 
 Prefer a custom type or a mark when callers must *branch on a category*; prefer a
 sentinel when they match a single well-known value.
+
+### Seal: the Opposite of a Mark
+
+`Mark` adds a match without changing what operators see. `Seal` removes every match
+without changing it either. `errors.Is`, `errors.As`, `AsType`, and `AsBehavior` stop
+at the seal, and so do an `errcode` code or message, an `errclass` class, and any mark
+beneath it. The message, the `%+v` trace, and `errors.Attrs` still show everything.
+
+Seal a dependency's error where it enters your domain, then attach your own meaning
+outside the seal:
+
+```go
+if errors.Is(err, sql.ErrNoRows) {
+	return errors.Mark(errors.Seal(err), ErrNotFound) // callers can match ErrNotFound only
+}
+```
+
+**Seal the cause, not the result.** `errors.Seal(errors.Mark(err, ErrNotFound))` hides
+the sentinel you just attached, and `errors.Seal(errcode.Link(…))` hides the code. A
+seal records no frame of its own: the wrap or mark around it records the location.
 
 One caveat on the example above: `StatusCode` stands for an *upstream* API status,
 illustrative structured data, not this service's own transport status.
@@ -362,30 +383,34 @@ codes lives in one place:
 func (s *Store) FindUser(ctx context.Context, id int) (*User, error) {
 	u, err := s.query(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Sever the chain: callers branch on the code, never on sql.ErrNoRows.
-		return nil, errcode.WithCodeOpaque(errcode.StatusNotFound, "user not found", err)
+		// Seal the cause: callers branch on the code, never on sql.ErrNoRows.
+		return nil, errcode.Link(errcode.StatusNotFound, "user not found", errors.Seal(err))
 	}
 	if err != nil {
-		// Keep the cause and its trace: a 500 is not a category callers branch on.
-		return nil, errcode.WithCode(errcode.StatusInternal, "", err)
+		// Keep the cause matchable: a 500 is not a category callers branch on.
+		return nil, errcode.Link(errcode.StatusInternal, "", err)
 	}
 	return u, nil
 }
 ```
 
-A single `errcode` call carries a code, a user message, and the cause together,
+A single `errcode.Link` call carries a code, a user message, and the cause together,
 one translate-and-wrap layer rather than the classic split (a *leaf* holding code
 and message, a separate *wrapper* holding the cause). The one choice to make is
-whether the cause stays reachable. `WithCode` keeps it in the `Unwrap` chain, so
-callers can `errors.Is`/`As` into it (the `%w`-style contract). `WithCodeOpaque`
-**severs** it, keeping the cause's text for operators but making its type
-unreachable (the `%v`-style translation). That severing is what "translate before
-they escape" means in practice: after `WithCodeOpaque`, `errors.Is(err, sql.ErrNoRows)`
-is false, so switching storage engines cannot break a caller. Reach for
-`WithCodeOpaque` when hiding a dependency (the not-found path above); reach for
-`WithCode` when the cause is your own or the operator needs its trace (the
-`StatusInternal` path). Where the failure starts in your own code, with no cause to
-carry, `errcode.New(code, message)` is the coded leaf.
+whether callers may match the cause. `Link` keeps it in the `Unwrap` chain, so
+callers can `errors.Is`/`As` into it (the `%w`-style contract). Sealing the cause
+first, `Link(code, message, errors.Seal(err))`, stops every match at the seal (the
+`%v`-style translation), while operators keep the cause's text, trace, and attributes.
+That seal is what "translate before they escape" means in practice: after it,
+`errors.Is(err, sql.ErrNoRows)` is false, so switching storage engines cannot break a
+caller. Seal when hiding a dependency (the not-found path above); link without a seal
+when the cause is your own (the `StatusInternal` path). `Link` returns nil for a nil
+cause, as `errors.Wrap` does. Where the failure starts in your own code, with no cause
+to carry, `errcode.New(code, message)` is the coded leaf.
+
+`WithCode` and `WithCodeOpaque` are deprecated spellings of `Link` and of `Link` over a
+sealed cause. They keep their behaviour, including a coded leaf for a nil cause, so an
+existing call never changes meaning.
 
 At the edge of the program, read the code back and map it to the transport,
 without knowing anything about the concrete error type:
@@ -431,16 +456,16 @@ and another for a wrap. Each shape has a direct spelling here:
 | ---------------------- | ------------------------------------------------------------- |
 | `{Code, Message}`      | `errcode.New(code, message)`                                  |
 | `{Op, Err}`            | `errors.WrapWithMessage(err, op)`, or `errors.Wrap(err)`      |
-| `{Code, Op, Err}`      | `errcode.WithCode(code, "", errors.WrapWithMessage(err, op))` |
-| `{Code, Message, Err}` | `errcode.WithCode(code, message, err)`                        |
+| `{Code, Op, Err}`      | `errcode.Link(code, "", errors.WrapWithMessage(err, op))`     |
+| `{Code, Message, Err}` | `errcode.Link(code, message, err)`                            |
 
 The `{Op, Err}` row renders `op: cause`, exactly as the struct did, and records a
 frame besides; once every leaf and wrap records one, `%+v` already shows the path,
 and `errors.Wrap(err)` is enough. The `{Code, Op, Err}` row nests a plain wrap
-inside the coded one because `WithCode(code, op, err)` would render
+inside the coded one because `Link(code, op, err)` would render
 `cause (op)`, reordering the text, and would make the `op` the user-facing
 message. The `{Code, Message, Err}` row changes output on purpose: the struct's
-`Error()` preferred `Err` and never printed `Message`, and `WithCode` prints both.
+`Error()` preferred `Err` and never printed `Message`, and `Link` prints both.
 
 Two habits from the struct do not survive a mixed codebase:
 
@@ -526,7 +551,7 @@ error travels from where it occurs to where it is finally handled:
 ```mermaid
 graph TD
     A[An error occurs] --> B{Where did it originate?}
-    B -->|external package| C[Translate at the boundary<br/>errcode.WithCode]
+    B -->|external package| C[Translate at the boundary<br/>errcode.Link over errors.Seal]
     B -->|our own code| D[Create a leaf error<br/>errors.New]
     C --> F{Can this layer<br/>handle it meaningfully?}
     D --> F
@@ -551,7 +576,7 @@ graph TD
     C -->|several independent| D[errors.Join<br/>callers still walk them with errors.Is]
     C -->|one| E{Will callers branch on it?}
     E -->|match a known value| F[Sentinel<br/>var ErrX = sentinel.New]
-    E -->|read fields / branch by type| G[Custom type, errcode.WithCode,<br/>or errors.Mark]
+    E -->|read fields / branch by type| G[Custom type, errcode.Link,<br/>or errors.Mark]
     E -->|just report it| H[errors.New]
     B -->|reacting| I{What do you need?}
     I -->|compare identity| J[errors.Is]
@@ -570,7 +595,8 @@ graph TD
 03. Wrap for context as errors rise, but capture **location**, not just a string
     prefix, use `errors.Wrap` / `errors.WrapWithMessage`.
 04. Translate external errors (`sql.ErrNoRows`, `os.ErrNotExist`) into domain codes
-    at the boundary. Do not let them leak to callers.
+    or sentinels at the boundary, sealing the cause with `errors.Seal`. Do not let
+    them leak to callers.
 05. Use a sentinel for identity, a custom type / mark / `errcode` for structured
     data, and `errors.Join` for independent failures collected together.
 06. Keep structured context in `slog.Attr` values on the error; keep the message
@@ -588,12 +614,12 @@ graph TD
 ## The Packages in This Repository
 
 - `errors` (root): the primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`,
-  `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
+  `Seal`, `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
   `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
   renders a return trace under `%+v`.
 - `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.
-- `errcode`: transport-neutral status codes (`WithCode`, `Code`, `Status`,
-  `Payload`). No transport concern lives here.
+- `errcode`: transport-neutral status codes (`New`, `Link`, `Code`, `Status`,
+  `Message`). No transport concern lives here.
 - `errhttp`: the HTTP adapter for `errcode`: `Status`, `StatusMessage`, and
   `Error(err)` map a domain code to an HTTP status at the boundary.
 - `errclass`: coarse severity classification (`Transient`, `Persistent`) that
