@@ -59,19 +59,19 @@ func TestJoinedClassIsTheMostSevere(t *testing.T) {
 	})
 }
 
-// TestOpaqueCodeSeversIdentityButKeepsText checks WithCodeOpaque's contract for any cause:
-// the code and message survive, the cause's text survives for operators, and the cause itself
-// is no longer reachable by errors.Is.
-func TestOpaqueCodeSeversIdentityButKeepsText(t *testing.T) {
+// TestSealedCodeHidesTheCauseButKeepsText checks Link over a sealed cause for any cause: the
+// code and message survive, the cause's text survives for operators, and the cause itself is
+// no longer reachable by errors.Is.
+func TestSealedCodeHidesTheCauseButKeepsText(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		cause := stderrors.New(rapid.String().Draw(t, "cause"))
 		code := rapid.SampledFrom(codes).Draw(t, "code")
 		message := rapid.String().Draw(t, "message")
 
-		err := errors.Wrap(errcode.WithCodeOpaque(code, message, cause))
+		err := errors.Wrap(errcode.Link(code, message, errors.Seal(cause)))
 
 		if errors.Is(err, cause) {
-			t.Fatalf("errors.Is still reaches the cause through WithCodeOpaque")
+			t.Fatalf("errors.Is still reaches the cause through the seal")
 		}
 		if !strings.Contains(err.Error(), cause.Error()) {
 			t.Fatalf("Error() %q dropped the cause text %q", err.Error(), cause.Error())
@@ -98,7 +98,7 @@ func TestHTTPErrorNeverExposesTheCause(t *testing.T) {
 		if rapid.Bool().Draw(t, "coded") {
 			code = rapid.SampledFrom(codes).Draw(t, "code")
 			message = rapid.SampledFrom([]string{"", "Try again later."}).Draw(t, "message")
-			err = errors.Wrap(errcode.WithCode(code, message, err))
+			err = errors.Wrap(errcode.Link(code, message, err))
 		}
 
 		status, got := errhttp.Error(err)
@@ -142,7 +142,7 @@ func TestCodedChainReportsOutermostCodeAndMessage(t *testing.T) {
 			default:
 				code := rapid.SampledFrom(codes).Draw(t, "code")
 				message := rapid.SampledFrom(messages).Draw(t, "message")
-				err = errcode.WithCode(code, message, err)
+				err = errcode.Link(code, message, err)
 				wantCode = code
 				wantMessage = cmp.Or(message, wantMessage)
 			}
