@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errclass"
 )
 
@@ -21,4 +22,17 @@ func ExampleGetClass() {
 	// Output:
 	// transient
 	// persistent
+}
+
+// A recovered panic is classified by the code that recovers it, so the most severe
+// class reaches whoever reads the batch.
+func ExampleWrapAs_panic() {
+	recovered := func() (err error) {
+		defer func() {
+			err = errclass.WrapAs(toerr.Recover(recover()), errclass.Panic)
+		}()
+		panic("index out of range")
+	}()
+	fmt.Println(errclass.GetClass(recovered))
+	// Output: panic
 }

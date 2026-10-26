@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errclass"
 )
 
@@ -185,6 +186,30 @@ func TestErrClassJoined(t *testing.T) {
 			class = errclass.GetClass(errD)
 			if class != tc.expectedClass {
 				t.Errorf("unexpected error class: want: %s got %s", tc.expectedClass, class)
+			}
+		})
+	}
+}
+
+// A boundary judges the class itself, so a seal must hide the class beneath it and
+// leave the one set outside it.
+func TestSealHidesTheClassBeneath(t *testing.T) {
+	inner := errclass.WrapAs(errTest, errclass.Transient)
+	cases := map[string]struct {
+		err  error
+		want errclass.Class
+	}{
+		"unsealed": {toerr.Wrap(inner), errclass.Transient},
+		"sealed":   {toerr.Wrap(toerr.Seal(inner)), errclass.Unknown},
+		"reclassified outside the seal": {
+			errclass.WrapAs(toerr.Seal(inner), errclass.Persistent),
+			errclass.Persistent,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := errclass.GetClass(tc.err); got != tc.want {
+				t.Errorf("GetClass = %s, want %s", got, tc.want)
 			}
 		})
 	}

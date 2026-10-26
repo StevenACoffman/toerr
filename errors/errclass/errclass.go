@@ -8,12 +8,21 @@ import "errors"
 // When determining the class of a joined error, the highest
 // class is returned.
 const (
-	Nil     Class = -1
+	// Nil is the class of a nil error.
+	Nil Class = -1
+	// Unknown is the class of an error nothing classified.
 	Unknown Class = 0
 
-	Transient  Class = 100
+	// Transient means the same operation may succeed if tried again.
+	Transient Class = 100
+	// Persistent means trying again cannot help.
 	Persistent Class = 110
 
+	// Panic marks an error recovered from a panic. errors.Recover does not set it,
+	// because the root errors package imports none of its subpackages; classify the
+	// recovered error yourself:
+	//
+	//	errclass.WrapAs(errors.Recover(recover()), errclass.Panic)
 	Panic Class = 900
 )
 

@@ -20,6 +20,19 @@ persistent, and the batch is never mistakenly retried.
   is `Nil`.
 - Classes, in ascending severity: `Nil` < `Unknown` < `Transient` < `Persistent` <
   `Panic`.
+- `Panic` is for a recovered panic. `errors.Recover` does not set it, because the
+  root package imports none of its subpackages, so classify the result yourself:
+  `errclass.WrapAs(errors.Recover(recover()), errclass.Panic)`.
+
+## At a Boundary
+
+`GetClass` finds a class anywhere in the chain, so a `Transient` set deep inside a
+dependency still answers at the top. A retryable cause doesn't make the outer
+operation retryable, for example when that operation isn't idempotent. Judge the
+class where the error crosses into another domain: reclassify with `WrapAs`, or seal
+the cause with `errors.Seal`, which `GetClass` cannot see past. Across a service or
+package boundary, prefer an [`errcode`](../errcode/) status, whose codes say whether
+a retry can help.
 
 ## Example
 
