@@ -25,6 +25,59 @@ var allCodes = []errcode.StatusCode{
 	errcode.StatusDataLoss,
 }
 
+// A downstream code that describes your call to the service, rather than your
+// caller's request, is your service's fault; the rest pass through.
+func TestFromError(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want errcode.StatusCode
+	}{
+		"nil":          {nil, errcode.StatusUnknown},
+		"not a status": {errors.New("boom"), errcode.StatusUnknown},
+		"wrapped status": {
+			toerr.Wrap(status.Error(codes.Unavailable, "x")),
+			errcode.StatusUnavailable,
+		},
+		"bare context error": {toerr.Wrap(context.Canceled), errcode.StatusCanceled},
+		"bare deadline":      {context.DeadlineExceeded, errcode.StatusDeadlineExceeded},
+		// Our request was wrong.
+		"invalid argument": {status.Error(codes.InvalidArgument, "x"), errcode.StatusInternal},
+		"failed precondition": {
+			status.Error(codes.FailedPrecondition, "x"),
+			errcode.StatusInternal,
+		},
+		"out of range":  {status.Error(codes.OutOfRange, "x"), errcode.StatusInternal},
+		"unimplemented": {status.Error(codes.Unimplemented, "x"), errcode.StatusInternal},
+		// Our credentials or grants were wrong.
+		"unauthenticated":   {status.Error(codes.Unauthenticated, "x"), errcode.StatusInternal},
+		"permission denied": {status.Error(codes.PermissionDenied, "x"), errcode.StatusInternal},
+		// The caller's entity, and the codes that carry retry guidance.
+		"not found":      {status.Error(codes.NotFound, "x"), errcode.StatusNotFound},
+		"already exists": {status.Error(codes.AlreadyExists, "x"), errcode.StatusAlreadyExists},
+		"unavailable":    {status.Error(codes.Unavailable, "x"), errcode.StatusUnavailable},
+		"resource exhausted": {
+			status.Error(codes.ResourceExhausted, "x"),
+			errcode.StatusResourceExhausted,
+		},
+		"aborted": {status.Error(codes.Aborted, "x"), errcode.StatusAborted},
+		"deadline exceeded": {
+			status.Error(codes.DeadlineExceeded, "x"),
+			errcode.StatusDeadlineExceeded,
+		},
+		"canceled":  {status.Error(codes.Canceled, "x"), errcode.StatusCanceled},
+		"data loss": {status.Error(codes.DataLoss, "x"), errcode.StatusDataLoss},
+		"internal":  {status.Error(codes.Internal, "x"), errcode.StatusInternal},
+		"unknown":   {status.Error(codes.Unknown, "x"), errcode.StatusUnknown},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := errgrpc.FromError(tc.err); got != tc.want {
+				t.Errorf("FromError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 // The two sets match apart from OK, so a code that goes out and comes back must be
 // the code that went out, and no two domain codes may share a gRPC code.
 func TestCodeRoundTrips(t *testing.T) {
@@ -96,7 +149,7 @@ func TestError(t *testing.T) {
 		},
 		"downstream status translated": {
 			errcode.Link(
-				errgrpc.FromCode(status.Code(downstream)),
+				errgrpc.FromError(downstream),
 				"",
 				toerr.Seal(downstream),
 			),

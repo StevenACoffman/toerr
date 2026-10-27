@@ -24,14 +24,25 @@ func ExampleError() {
 }
 
 // An error from a gRPC client call is translated where it enters your code, and
-// sealed, so callers branch on the domain code and cannot match the gRPC status.
-func ExampleFromCode() {
-	remote := status.Error(codes.Unavailable, "connection refused")
-	err := errcode.Link(errgrpc.FromCode(status.Code(remote)), "", toerr.Seal(remote))
-
-	fmt.Println(errcode.Status(err))
-	fmt.Println(status.Code(err))
+// sealed, so callers branch on the domain code and cannot match the gRPC status. A
+// downstream PermissionDenied is about your service's grants, not your caller's, so it
+// becomes Internal; an outage passes through.
+func ExampleFromError() {
+	for _, remote := range []error{
+		status.Error(codes.PermissionDenied, "service account lacks users.get"),
+		status.Error(codes.Unavailable, "connection refused"),
+	} {
+		err := errcode.Link(errgrpc.FromError(remote), "", toerr.Seal(remote))
+		fmt.Println(errcode.Status(err), status.Code(err))
+	}
 	// Output:
-	// unavailable
-	// Unknown
+	// internal Unknown
+	// unavailable Unknown
+}
+
+// FromCode is the raw table, for a call that forwarded the caller's input unchanged:
+// a downstream InvalidArgument is then the caller's to fix.
+func ExampleFromCode() {
+	fmt.Println(errgrpc.FromCode(codes.InvalidArgument))
+	// Output: invalid_argument
 }

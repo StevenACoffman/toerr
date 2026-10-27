@@ -22,19 +22,27 @@ go get github.com/StevenACoffman/toerr/errors/errgrpc
   name when there is none. It never uses `err.Error()`. Without it, gRPC sends
   `err.Error()` itself to the client for any error that is not a bare status. Log
   `err` before you convert it, because the status keeps only the code and message.
-- `errgrpc.FromCode(code) errcode.StatusCode`: for an error a gRPC client call
+- `errgrpc.FromError(err) errcode.StatusCode`: for an error a gRPC client call
   returned. Translate and seal it where it enters your code, so callers branch on
   the domain code and cannot match the gRPC status:
 
   ```go
   resp, err := client.GetUser(ctx, req)
   if err != nil {
-      return nil, errcode.Link(errgrpc.FromCode(status.Code(err)), "", errors.Seal(err))
+      return nil, errcode.Link(errgrpc.FromError(err), "", errors.Seal(err))
   }
   ```
 
-  The remote message stays in the operator view (`Error()` and `%+v`) and out of
-  `errcode.Message`, because the remote service wrote it for its own operators.
+  A downstream code describes your call to that service, so `FromError` adjusts the
+  party responsible, as Google's error model asks of a service that depends on
+  others. `InvalidArgument`, `FailedPrecondition`, `OutOfRange`, and `Unimplemented`
+  mean your request was wrong, and `Unauthenticated` and `PermissionDenied` that your
+  service's credentials were: all become `Internal`. `NotFound`, `AlreadyExists`, and
+  the codes that carry retry guidance pass through. The remote message stays in the
+  operator view (`Error()` and `%+v`) and out of `errcode.Message`, because the
+  remote service wrote it for its own operators.
+- `errgrpc.FromCode(code) errcode.StatusCode`: the raw table, the domain code of the
+  same name, for a call that forwarded the caller's input unchanged.
 - `errgrpc.Code(code) codes.Code`: map an `errcode.StatusCode` to a gRPC code.
 
 A gRPC status already in an error's chain is not passed through by `Error`. It

@@ -91,7 +91,12 @@ codes.
 - `errgrpc.Error(err)`: a gRPC status error carrying the code and user-facing message,
   never `err.Error()`. An error without a code that wraps a context error becomes
   `Canceled` or `DeadlineExceeded`, as grpc-go's server answers a bare context error.
-- `errgrpc.FromCode(code)`: the domain code for a client call's gRPC code.
+- `errgrpc.FromError(err)`: the domain code for an error a gRPC client call returned,
+  as the code of the operation that made the call. A downstream code that describes
+  your call to the service (`InvalidArgument`, `FailedPrecondition`, `OutOfRange`,
+  `Unimplemented`, `Unauthenticated`, `PermissionDenied`) becomes `Internal`.
+- `errgrpc.FromCode(code)`: the raw table, the domain code of the same name, for a
+  call that forwarded the caller's input unchanged.
 - `errgrpc.Code(code)`: the gRPC code for a domain code.
 
 ## errpgx v0.1.0 (Unreleased)

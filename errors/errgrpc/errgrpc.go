@@ -2,6 +2,8 @@ package errgrpc
 
 import (
 	"cmp"
+	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,21 +56,11 @@ func Code(code errcode.StatusCode) codes.Code {
 	return codes.Unknown
 }
 
-// FromCode maps a gRPC code to a domain status code, for an error a gRPC client
-// call returned. OK, which is not an error, and a value outside gRPC's set map to
-// StatusUnknown.
-//
-// Translate a client error where it enters your code, and seal it, so callers match
-// the domain code and never the gRPC status:
-//
-//	resp, err := client.GetUser(ctx, req)
-//	if err != nil {
-//		return nil, errcode.Link(errgrpc.FromCode(status.Code(err)), "", errors.Seal(err))
-//	}
-//
-// The Link records your call site in the return trace. The remote message stays in
-// the operator view (Error and %+v) and out of errcode.Message: the remote service
-// wrote it for its own operators, not for your users.
+// FromCode maps a gRPC code to the domain code of the same name. OK, which is not an
+// error, and a value outside gRPC's set map to StatusUnknown. It is the raw table: for
+// an error a client call returned, use FromError, which adjusts the codes that
+// describe your call to the downstream service rather than your caller's request, and
+// keep FromCode for a call that forwarded the caller's input unchanged.
 //
 //nolint:cyclop // flat exhaustive value mapping; inherent, not branching logic.
 func FromCode(code codes.Code) errcode.StatusCode {
@@ -107,6 +99,51 @@ func FromCode(code codes.Code) errcode.StatusCode {
 		return errcode.StatusDataLoss
 	}
 	return errcode.StatusUnknown
+}
+
+// FromError returns the domain status code for an error a gRPC client call returned,
+// as the code of the operation that made the call, or StatusUnknown for nil and for an
+// error without a gRPC status.
+//
+// A downstream code describes your call to that service, not your caller's request, so
+// FromError adjusts the party responsible for it, as Google's error model asks of a
+// service that depends on others. InvalidArgument, FailedPrecondition, OutOfRange, and
+// Unimplemented mean your request to it was wrong, and Unauthenticated and
+// PermissionDenied mean your service's credentials or grants were: all six become
+// StatusInternal. NotFound and AlreadyExists, which usually concern the caller's own
+// entity, and the codes that carry retry guidance pass through. A context error comes
+// first, for a client wrapper that returns ctx.Err() itself.
+//
+// Translate the error where it enters your code, and seal it:
+//
+//	resp, err := client.GetUser(ctx, req)
+//	if err != nil {
+//		return nil, errcode.Link(errgrpc.FromError(err), "", errors.Seal(err))
+//	}
+//
+// The seal stops callers matching the gRPC status, and the Link records your call
+// site in the return trace. The remote message stays in the operator view (Error and
+// %+v) and out of errcode.Message: the remote service wrote it for its own operators,
+// not for your users.
+//
+// When your call forwarded the caller's own input unchanged, so that a downstream
+// InvalidArgument is the caller's to fix, use FromCode instead.
+func FromError(err error) errcode.StatusCode {
+	switch {
+	case err == nil:
+		return errcode.StatusUnknown
+	case errors.Is(err, context.DeadlineExceeded):
+		return errcode.StatusDeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		return errcode.StatusCanceled
+	}
+	switch code := status.Code(err); code {
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange,
+		codes.Unimplemented, codes.Unauthenticated, codes.PermissionDenied:
+		return errcode.StatusInternal
+	default:
+		return FromCode(code)
+	}
 }
 
 // Error converts err into a gRPC status error for a handler to return, or nil if
