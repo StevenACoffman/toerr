@@ -17,26 +17,22 @@ updates:
   # version has time to be noticed and yanked before it lands here.
   cooldown:
     default-days: 7
-# Maintain dependencies for Go Modules
-- package-ecosystem: "gomod" # See documentation for possible values
-  directory: "/" # Location of package manifests
+# Maintain dependencies for every Go module: the root, each adapter under errors/,
+# and proptest/. The glob finds a new module without an edit here. Each directory gets
+# its own grouped pull request, since each module resolves its own versions.
+- package-ecosystem: "gomod"
+  directories:
+  - "/"
+  - "/**/*"
   groups:
     go-deps:
       patterns:
       - "*"
-  schedule:
-    interval: "weekly"
-  # Hold a new release back for a week before proposing it, so a compromised or broken
-  # version has time to be noticed and yanked before it lands here.
-  cooldown:
-    default-days: 7
-# The property-test module has its own go.mod (rapid lives only there).
-- package-ecosystem: "gomod"
-  directory: "/proptest"
-  groups:
-    proptest-deps:
-      patterns:
-      - "*"
+  # Every module builds against this repository's toerr through a replace, and
+  # bin/release.sh sets the version the adapters require, so a bump of it here would
+  # only fight the release.
+  ignore:
+  - dependency-name: "github.com/StevenACoffman/toerr"
   schedule:
     interval: "weekly"
   # Hold a new release back for a week before proposing it, so a compromised or broken
