@@ -20,7 +20,7 @@ go get github.com/StevenACoffman/toerr/errors/errpgx
 
 ## Usage
 
-- `errpgx.Status(err) errcode.StatusCode`: the code for an error pgx returned, or
+- `errpgx.FromError(err) errcode.StatusCode`: the code for an error pgx returned, or
   `StatusUnknown` when it cannot say.
 - `errpgx.FromSQLState(state) errcode.StatusCode`: the code for a SQLSTATE.
 - `errpgx.Attrs(err) []slog.Attr`: a `pg` group of the server error's sqlstate,
@@ -32,7 +32,7 @@ Translate and seal in one line, where the error leaves the repository:
 
 ```go
 if err != nil {
-	return nil, errcode.Link(errpgx.Status(err), "", errors.Seal(err))
+	return nil, errcode.Link(errpgx.FromError(err), "", errors.Seal(err))
 }
 ```
 
@@ -40,7 +40,7 @@ To keep the server's fields in the log, attach them with the wrap that says what
 being attempted:
 
 ```go
-return errcode.Link(errpgx.Status(err), "",
+return errcode.Link(errpgx.FromError(err), "",
 	errors.WrapWithMessage(errors.Seal(err), "insert user", errpgx.Attrs(err)...))
 ```
 
@@ -80,7 +80,7 @@ classified by its class.
 func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	_, err := s.pool.Exec(ctx, insertUser, u.Email)
 	if err != nil {
-		return errcode.Link(errpgx.Status(err), "", errors.Seal(err))
+		return errcode.Link(errpgx.FromError(err), "", errors.Seal(err))
 	}
 	return nil
 }

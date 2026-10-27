@@ -556,9 +556,9 @@ That seal is what "translate before they escape" means in practice: after it,
 caller. Seal when hiding a dependency, and link without a seal only when the cause is
 your own. An error no caller branches on, like every other database error here, needs
 a seal and a message but no code: it is a code or nothing, and the edge answers it as a
-generic failure. With pgx, `errpgx.Status` chooses the code for every database error,
+generic failure. With pgx, `errpgx.FromError` chooses the code for every database error,
 so a connection failure answers `StatusUnavailable` instead of looking like a bug:
-`errcode.Link(errpgx.Status(err), "", errors.Seal(err))`. `Link` returns nil for a nil
+`errcode.Link(errpgx.FromError(err), "", errors.Seal(err))`. `Link` returns nil for a nil
 cause, as `errors.Wrap` does. Where the failure starts in your own code, with no cause
 to carry, `errcode.New(code, message)` is the coded leaf. Give every coded leaf a
 message. Without one, it renders as its code in words (`not found`), and the user

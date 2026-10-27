@@ -14,9 +14,9 @@ import (
 
 // A repository translates pgx's error where it leaves, and seals it: callers branch on
 // the domain code and cannot match *pgconn.PgError.
-func ExampleStatus() {
+func ExampleFromError() {
 	cause := &pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "users_email_key"}
-	err := errcode.Link(errpgx.Status(cause), "that email is taken", toerr.Seal(cause))
+	err := errcode.Link(errpgx.FromError(cause), "that email is taken", toerr.Seal(cause))
 
 	var pgErr *pgconn.PgError
 	fmt.Println(errcode.Status(err), errcode.Message(err), errors.As(err, &pgErr))

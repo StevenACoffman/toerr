@@ -13,7 +13,7 @@ import (
 	"github.com/StevenACoffman/toerr/errors/errcode"
 )
 
-// Status returns the domain status code for an error pgx returned, or StatusUnknown
+// FromError returns the domain status code for an error pgx returned, or StatusUnknown
 // for nil and for an error it cannot classify.
 //
 // The code describes the operation to its caller, not the database's view of it. A
@@ -30,7 +30,7 @@ import (
 // or one pgconn reports reached nothing on the server, is StatusUnavailable, even when
 // the connection timed out: no statement ran. A timeout after a statement was sent is
 // StatusDeadlineExceeded, since the statement may have run.
-func Status(err error) errcode.StatusCode {
+func FromError(err error) errcode.StatusCode {
 	var pgErr *pgconn.PgError
 	var connectErr *pgconn.ConnectError
 	switch {
@@ -78,7 +78,7 @@ func FromSQLState(state string) errcode.StatusCode {
 // empty. It returns nil when err holds no *pgconn.PgError. Attach them with the wrap
 // that says what was being attempted:
 //
-//	return errcode.Link(errpgx.Status(err), "",
+//	return errcode.Link(errpgx.FromError(err), "",
 //		errors.WrapWithMessage(errors.Seal(err), "insert user", errpgx.Attrs(err)...))
 //
 // The Detail, Hint, Where, and InternalQuery fields are left out, because they can

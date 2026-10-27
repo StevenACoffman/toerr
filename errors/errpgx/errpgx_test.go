@@ -87,7 +87,7 @@ func TestFromSQLState(t *testing.T) {
 	}
 }
 
-func TestStatus(t *testing.T) {
+func TestFromError(t *testing.T) {
 	cases := map[string]struct {
 		err  error
 		want errcode.StatusCode
@@ -120,8 +120,8 @@ func TestStatus(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := errpgx.Status(tc.err); got != tc.want {
-				t.Errorf("Status(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := errpgx.FromError(tc.err); got != tc.want {
+				t.Errorf("FromError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -129,7 +129,7 @@ func TestStatus(t *testing.T) {
 
 // Connection failures come from real sockets: pgx's timeout error cannot be built
 // outside pgconn.
-func TestStatusOfConnectionFailures(t *testing.T) {
+func TestFromErrorOfConnectionFailures(t *testing.T) {
 	cases := map[string]struct {
 		run  func(t *testing.T) error
 		want errcode.StatusCode
@@ -143,8 +143,8 @@ func TestStatusOfConnectionFailures(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			err := tc.run(t)
-			if got := errpgx.Status(err); got != tc.want {
-				t.Errorf("Status(%v) = %v, want %v", err, got, tc.want)
+			if got := errpgx.FromError(err); got != tc.want {
+				t.Errorf("FromError(%v) = %v, want %v", err, got, tc.want)
 			}
 		})
 	}
@@ -166,7 +166,7 @@ func TestSealedTranslationAnswersAtTheBoundary(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			translated := errcode.Link(errpgx.Status(tc.err), "", toerr.Seal(tc.err))
+			translated := errcode.Link(errpgx.FromError(tc.err), "", toerr.Seal(tc.err))
 			if status, _ := errhttp.Error(translated); status != tc.want {
 				t.Errorf("errhttp status = %d, want %d", status, tc.want)
 			}
@@ -296,7 +296,7 @@ func TestAttrsInLogValue(t *testing.T) {
 		Code: pgerrcode.UniqueViolation, ConstraintName: "users_email_key",
 		Detail: "Key (email)=(ada@example.com) already exists.",
 	}
-	err := errcode.Link(errpgx.Status(cause), "",
+	err := errcode.Link(errpgx.FromError(cause), "",
 		toerr.WrapWithMessage(toerr.Seal(cause), "insert user", errpgx.Attrs(cause)...))
 
 	data, _ := toerr.LogValue(err).Any().(json.Marshaler).MarshalJSON()

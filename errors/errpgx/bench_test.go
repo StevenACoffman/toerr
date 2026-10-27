@@ -14,11 +14,11 @@ import (
 // codeSink keeps the compiler from discarding the work under measurement.
 var codeSink errcode.StatusCode
 
-// BenchmarkStatus is the price of classifying a server error at the repository's
+// BenchmarkFromError is the price of classifying a server error at the repository's
 // boundary: the context and sentinel checks, then the SQLSTATE lookup.
-func BenchmarkStatus(b *testing.B) {
+func BenchmarkFromError(b *testing.B) {
 	err := fmt.Errorf("insert user: %w", &pgconn.PgError{Code: pgerrcode.UniqueViolation})
 	for b.Loop() {
-		codeSink = errpgx.Status(err)
+		codeSink = errpgx.FromError(err)
 	}
 }

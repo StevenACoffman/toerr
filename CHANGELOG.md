@@ -100,7 +100,7 @@ The first release of `github.com/StevenACoffman/toerr/errors/errpgx`, a module o
 own so that pgx stays out of toerr's dependency graph. Tag it as
 `errors/errpgx/v0.1.0` after toerr v0.3.0 is tagged.
 
-- `errpgx.Status(err)`: the domain code for an error from `github.com/jackc/pgx/v5`,
+- `errpgx.FromError(err)`: the domain code for an error from `github.com/jackc/pgx/v5`,
   chosen by the retry guidance each code carries. A context error comes first, a
   failure to connect is `Unavailable`, and the database's own credentials and grants
   are `Internal`.
