@@ -44,6 +44,26 @@ never exposes the wrapped internal detail that `err.Error()` would.
   by repeating the whole read-modify-write. So a boundary can decide a retry from
   `Status` alone.
 
+## Choosing a Code
+
+A code tells the caller what to do, not only what happened. Each one carries retry
+guidance in its godoc, and more than the caller reads it: gRPC retry policies, service
+meshes, proxies, and retry middleware retry, reroute, or fail fast on the code without
+asking the program.
+
+- Describe the operation to its caller. A repository's caller did not log in to its
+  database, so a bad database password is `StatusInternal`, not
+  `StatusUnauthenticated`.
+- `StatusInternal` is for a broken invariant. It is not the code for everything
+  unclassified: an error nobody classified needs no code at all, and a dependency that
+  is down is `StatusUnavailable`, so callers can tell an outage from a bug.
+- When the failure is a dependency's, translate it where it enters your domain.
+  [`errpgx`](../errpgx/) does that for PostgreSQL, and its mapping table is a worked
+  example of choosing each code by what a retry would do.
+
+See the guide's
+[Deciding Retries at a Boundary](../../philosophy.md#deciding-retries-at-a-boundary).
+
 ## Example
 
 ```go

@@ -14,15 +14,18 @@ import (
 )
 
 // The gRPC canonical status codes (https://grpc.github.io/grpc/core/md_doc_statuscodes.html),
-// apart from OK, named without reference to any transport. Each code says whether
-// retrying can help, so a boundary decides retries from Status alone.
+// apart from OK, named without reference to any transport. A code tells the caller
+// what to do, not only what happened: each one says whether retrying can help, so a
+// boundary decides retries from Status alone, and so do the proxies and retry
+// middleware between it and the client.
 //
 // Values are assigned by iota, so append new codes at the end only: inserting or
 // reordering renumbers every code below it. Each switch on StatusCode omits its
 // default arm so the exhaustive linter fails the build until a new code is handled;
 // no manual search for switches is needed.
 const (
-	// StatusUnknown means no code was attached. Treat it as Internal.
+	// StatusUnknown means no code was attached. A boundary answers it as it answers
+	// Internal, but it means unclassified, not a bug.
 	StatusUnknown StatusCode = iota
 	// StatusCanceled means the caller gave up, usually through its context.
 	StatusCanceled
@@ -32,7 +35,9 @@ const (
 	// StatusDeadlineExceeded means time ran out. The operation may still have
 	// completed, so retry only an idempotent one.
 	StatusDeadlineExceeded
-	// StatusInternal means an invariant broke: a bug, not a condition to retry.
+	// StatusInternal means an invariant broke: a bug, not a condition to retry. It is
+	// not a default: an error nobody classified needs no code, and a dependency that is
+	// down is Unavailable.
 	StatusInternal
 	// StatusNotFound means the requested entity does not exist.
 	StatusNotFound
