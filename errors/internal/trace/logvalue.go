@@ -11,6 +11,7 @@ package trace
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 // are left out.
 type Layer struct {
 	Msg    string // this error's own message, without its cause's
+	Type   string // the Go type, set only for an error from another package
 	Code   string
 	Class  string
 	Mark   string
@@ -153,7 +155,7 @@ func writeLayer(b *bytes.Buffer, err, cause error) {
 	l := describe(err, cause)
 	o := object{b: b}
 	for _, field := range []struct{ key, value string }{
-		{"msg", l.Msg}, {"code", l.Code}, {"class", l.Class}, {"mark", l.Mark},
+		{"msg", l.Msg}, {"type", l.Type}, {"code", l.Code}, {"class", l.Class}, {"mark", l.Mark},
 	} {
 		if field.value != "" {
 			o.key(field.key)
@@ -176,13 +178,14 @@ func writeLayer(b *bytes.Buffer, err, cause error) {
 }
 
 // describe returns err's layer: its own, if it is one of this module's errors, and
-// otherwise one built from its methods. A multi-error's text is its branches', so it
-// has no message of its own.
+// otherwise one built from its methods and named by its type, which is what a query
+// for a dependency's error needs and what %T reads without calling a method. A
+// multi-error's text is its branches', so it has no message of its own.
 func describe(err, cause error) Layer {
 	if d, ok := err.(Describer); ok {
 		return d.DescribeLayer(Token{})
 	}
-	var l Layer
+	l := Layer{Type: fmt.Sprintf("%T", err)}
 	if a, ok := err.(interface{ Attrs() []slog.Attr }); ok {
 		l.Attrs = a.Attrs()
 	}

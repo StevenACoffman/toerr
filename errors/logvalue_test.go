@@ -13,6 +13,7 @@ import (
 	"time"
 
 	errors "github.com/StevenACoffman/toerr/errors"
+	"github.com/StevenACoffman/toerr/errors/sentinel"
 )
 
 // panicText is what LogValue writes for a typed-nil *nilDerefError, as slog does.
@@ -126,20 +127,23 @@ func TestLogValueShape(t *testing.T) {
 		},
 		"mark on a foreign error": {
 			errors.Mark(stderrors.New("x"), marker),
-			`{"msg":"x","chain":[{"mark":"marker"},{"at":"logvalue_test.go"},{"msg":"x"}]}`,
+			`{"msg":"x","chain":[{"mark":"marker"},{"at":"logvalue_test.go"},` +
+				`{"msg":"x","type":"*errors.errorString"}]}`,
 		},
 		"foreign wrapper with a prefix": {
 			fmt.Errorf("load config: %w", errors.New("x")),
-			`{"msg":"load config: x","chain":[{"msg":"load config"},` +
+			`{"msg":"load config: x","chain":[{"msg":"load config","type":"*fmt.wrapError"},` +
 				`{"msg":"x","at":"logvalue_test.go"}]}`,
 		},
 		"foreign wrapper without a prefix keeps its whole text": {
 			fmt.Errorf("%w (retrying)", stderrors.New("x")),
-			`{"msg":"x (retrying)","chain":[{"msg":"x (retrying)"},{"msg":"x"}]}`,
+			`{"msg":"x (retrying)","chain":[{"msg":"x (retrying)","type":"*fmt.wrapError"},` +
+				`{"msg":"x","type":"*errors.errorString"}]}`,
 		},
 		"foreign wrapper that adds nothing": {
 			fmt.Errorf("%w", stderrors.New("x")),
-			`{"msg":"x","chain":[{},{"msg":"x"}]}`,
+			`{"msg":"x","chain":[{"type":"*fmt.wrapError"},` +
+				`{"msg":"x","type":"*errors.errorString"}]}`,
 		},
 		"typed marker that says nothing names its type": {
 			errors.Mark(errors.New("x"), &silentMarkerError{}),
@@ -148,22 +152,30 @@ func TestLogValueShape(t *testing.T) {
 		},
 		"multi-error with attributes of its own": {
 			&batchError{errs: []error{stderrors.New("a"), stderrors.New("b")}},
-			`{"msg":"a\nb","chain":[{"attrs":{"batch":7}}],"errors":[` +
-				`{"chain":[{"msg":"a"}]},{"chain":[{"msg":"b"}]}]}`,
+			`{"msg":"a\nb","chain":[{"type":"*errors_test.batchError","attrs":{"batch":7}}],` +
+				`"errors":[{"chain":[{"msg":"a","type":"*errors.errorString"}]},` +
+				`{"chain":[{"msg":"b","type":"*errors.errorString"}]}]}`,
 		},
 		"typed nil": {
 			error(typedNil),
-			`{"msg":"` + panicText + `","chain":[{"msg":"` + panicText + `"}]}`,
+			`{"msg":"` + panicText + `","chain":[` +
+				`{"msg":"` + panicText + `","type":"*errors_test.nilDerefError"}]}`,
 		},
 		"typed nil beneath a wrap keeps the wrap": {
 			errors.Wrap(typedNil, slog.String("op", "a")),
 			`{"msg":"` + panicText + `","chain":[` +
-				`{"at":"logvalue_test.go","attrs":{"op":"a"}},{"msg":"` + panicText + `"}]}`,
+				`{"at":"logvalue_test.go","attrs":{"op":"a"}},` +
+				`{"msg":"` + panicText + `","type":"*errors_test.nilDerefError"}]}`,
+		},
+		"a sentinel is one of toerr's own, without a type": {
+			errors.Wrap(sentinel.New("not found")),
+			`{"msg":"not found","chain":[{"at":"logvalue_test.go"},{"msg":"not found"}]}`,
 		},
 		"foreign error with attributes": {
 			&sqlFieldError{column: "email"},
 			`{"msg":"bad column email","chain":[` +
-				`{"msg":"bad column email","attrs":{"column":"email"}}]}`,
+				`{"msg":"bad column email","type":"*errors_test.sqlFieldError",` +
+				`"attrs":{"column":"email"}}]}`,
 		},
 	}
 	for name, tc := range cases {

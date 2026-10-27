@@ -222,7 +222,7 @@ func TestLogValueShowsTheClass(t *testing.T) {
 
 	data, _ := toerr.LogValue(err).Any().(json.Marshaler).MarshalJSON()
 	want := `{"msg":"this is a test error","chain":[{"class":"transient"},` +
-		`{"msg":"this is a test error"}]}`
+		`{"msg":"this is a test error","type":"*errors.errorString"}]}`
 	if string(data) != want {
 		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}

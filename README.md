@@ -164,7 +164,8 @@ of its own, so two errors' `op` never meet in one object:
 ```
 
 A layer also shows an `errcode` code, an `errclass` class, a `Mark`, and a `Seal`,
-whose hidden cause it still describes. Attribute values are resolved first, so a
+whose hidden cause it still describes. A layer from another package's error, such as a
+`*pq.Error`, also names its Go `type`. Attribute values are resolved first, so a
 `slog.LogValuer` that redacts a secret still redacts it.
 
 Errors deliberately do **not** implement `slog.LogValuer` themselves, so passing one

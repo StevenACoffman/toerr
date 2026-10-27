@@ -35,7 +35,8 @@ release notes when you tag it.
   siblings in a join; a backend that decodes into a map kept one value. It now returns
   a value that JSON handlers write as an object: each error in a chain is a layer with
   its own message, call site (`at`), attributes, and any code, class, mark, or seal,
-  and each branch of a join is a tree of its own. The value's kind is `Any`, not
+  and each branch of a join is a tree of its own. A layer from another package's
+  error also names its Go `type`. The value's kind is `Any`, not
   `Group`, so code that read it with `Value.Group` or matched the group in
   `ReplaceAttr` must read the JSON instead. `errors.Attrs` still returns the flat
   list, and a nil error now gives the zero `Value` rather than a panic.

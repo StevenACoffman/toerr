@@ -262,8 +262,9 @@ func formatError(err error, s fmt.State, verb rune) {
 // Each layer keeps its own message, call site, and attributes, so no key collides with
 // another error's, however many siblings set it. A layer also carries "code" and
 // "class" from errcode and errclass, "mark" from Mark, and "sealed" from Seal, whose
-// cause it still shows. Empty fields are left out. Within one layer a repeated key
-// keeps its first position and takes its last value.
+// cause it still shows. A layer from another package's error also carries its Go
+// "type", such as "*pq.Error"; toerr's own layers do not. Empty fields are left out.
+// Within one layer a repeated key keeps its first position and takes its last value.
 //
 // Attribute values are resolved, so a slog.LogValuer that redacts still redacts, and
 // are encoded as slog's JSON handler encodes them. An error from another package is

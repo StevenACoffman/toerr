@@ -22,7 +22,8 @@ func FuzzTreeEscapesAsEncodingJSON(f *testing.F) {
 		got, _ := trace.NewJSONTree(stderrors.New(s)).MarshalJSON()
 
 		type layer struct {
-			Msg string `json:"msg,omitempty"`
+			Msg  string `json:"msg,omitempty"`
+			Type string `json:"type"`
 		}
 		var want bytes.Buffer
 		enc := json.NewEncoder(&want)
@@ -30,7 +31,7 @@ func FuzzTreeEscapesAsEncodingJSON(f *testing.F) {
 		_ = enc.Encode(struct {
 			Msg   string  `json:"msg"`
 			Chain []layer `json:"chain"`
-		}{s, []layer{{s}}})
+		}{s, []layer{{s, "*errors.errorString"}}})
 
 		if !bytes.Equal(got, bytes.TrimSuffix(want.Bytes(), []byte("\n"))) {
 			t.Errorf("got  %s\nwant %s", got, want.Bytes())
