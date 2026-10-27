@@ -1,6 +1,7 @@
 package errcode_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -52,4 +53,14 @@ func ExampleLink_sealed() {
 	// false
 	// sql: no rows in result set (user not found)
 	// user not found
+}
+
+// A handler that returns its context's error has not failed: the caller gave up.
+// ForTransport answers it as cancelled, where Status reports no code at all.
+func ExampleForTransport() {
+	err := toerr.Wrapf(context.Canceled, "load seat %d", 7)
+
+	code, _ := errcode.ForTransport(err)
+	fmt.Println(code, errcode.Status(err))
+	// Output: canceled unknown
 }

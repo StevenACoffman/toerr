@@ -55,6 +55,10 @@ release notes when you tag it.
   parallel branch), and `Attrs`. Standard library only.
 - `errcode.New(code, message)`: the coded leaf.
 - `errcode.Link(code, message, err)`: the coded wrap.
+- `errcode.ForTransport(err)`: the code and message a transport adapter answers with.
+  It is `Code`, except that an error without a code that wraps
+  `context.DeadlineExceeded` or `context.Canceled` gets `StatusDeadlineExceeded` or
+  `StatusCanceled`, so an abandoned or timed-out request is not counted as a failure.
 - `errcode.StatusUnavailable`, `StatusResourceExhausted`, `StatusAborted`,
   `StatusOutOfRange`, and `StatusDataLoss`, appended so no existing value changes. The
   set is now gRPC's canonical codes apart from OK, and each code's godoc says whether a

@@ -3,6 +3,7 @@ package errcode
 // from https://github.com/remko/go-errors/blob/main/code.go
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -221,6 +222,30 @@ func Message(err error) string {
 		return ""
 	}
 	return wc.userMessage()
+}
+
+// ForTransport returns the code and message a transport adapter answers err with.
+// It is [Code], except for an error whose code is StatusUnknown that wraps a context
+// error: context.DeadlineExceeded gives StatusDeadlineExceeded and context.Canceled
+// gives StatusCanceled, checked in that order, as gRPC's status.FromContextError
+// checks them. A request the caller abandoned, or that ran out of time, is then
+// answered, counted, and logged apart from a failure.
+//
+// An explicit code wins, so a wrap that classified the context error keeps its code,
+// and a [toerr.Seal] hides the context error as it hides everything beneath it.
+// Status and Code are unchanged: they report only codes that were attached.
+func ForTransport(err error) (StatusCode, string) {
+	code, message := Code(err)
+	if code != StatusUnknown {
+		return code, message
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return StatusDeadlineExceeded, message
+	case errors.Is(err, context.Canceled):
+		return StatusCanceled, message
+	}
+	return code, message
 }
 
 func (e *withCodeError) Unwrap() error {

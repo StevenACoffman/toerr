@@ -1,6 +1,7 @@
 package errcode_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -295,6 +296,54 @@ func TestACodedErrorContributesItsCallSite(t *testing.T) {
 			}
 			if !strings.HasPrefix(got, tc.err.Error()+"\n") {
 				t.Errorf("%%+v does not lead with the message %q:\n%s", tc.err.Error(), got)
+			}
+		})
+	}
+}
+
+// ForTransport answers an unclassified context error with its own code, and leaves
+// every attached code, and every sealed cause, as Code reports it.
+func TestForTransport(t *testing.T) {
+	cases := map[string]struct {
+		err      error
+		wantCode errcode.StatusCode
+		wantMsg  string
+	}{
+		"canceled": {
+			toerr.Wrapf(context.Canceled, "load seat"), errcode.StatusCanceled, "",
+		},
+		"deadline exceeded": {
+			toerr.Wrapf(context.DeadlineExceeded, "load seat"), errcode.StatusDeadlineExceeded, "",
+		},
+		"deadline is checked before cancellation": {
+			errors.Join(context.Canceled, context.DeadlineExceeded),
+			errcode.StatusDeadlineExceeded, "",
+		},
+		"an attached code wins": {
+			errcode.Link(errcode.StatusUnavailable, "try again", context.Canceled),
+			errcode.StatusUnavailable, "try again",
+		},
+		"a seal hides the context error": {
+			toerr.Wrap(toerr.Seal(context.Canceled)), errcode.StatusUnknown, "",
+		},
+		"an unknown code with a message keeps it": {
+			errcode.Link(errcode.StatusUnknown, "gave up", context.Canceled),
+			errcode.StatusCanceled, "gave up",
+		},
+		"no context error": {errors.New("boom"), errcode.StatusUnknown, ""},
+		"nil":              {nil, errcode.StatusUnknown, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			code, msg := errcode.ForTransport(tc.err)
+			if code != tc.wantCode || msg != tc.wantMsg {
+				t.Errorf(
+					"ForTransport = (%v, %q), want (%v, %q)",
+					code,
+					msg,
+					tc.wantCode,
+					tc.wantMsg,
+				)
 			}
 		})
 	}
