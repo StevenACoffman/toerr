@@ -60,7 +60,7 @@ func Format(err error) string {
 // buildTree splits err into its tree, following each error's Unwrap, or a seal's
 // hidden cause, and branching at an Unwrap() []error.
 func buildTree(err error) tree {
-	t := tree{err: err}
+	t := tree{err: err, chain: make([]error, 0, chainLen(err))}
 	for err != nil {
 		t.chain = append(t.chain, err)
 		if multi, ok := err.(interface{ Unwrap() []error }); ok {
@@ -72,6 +72,19 @@ func buildTree(err error) tree {
 		err = next(err)
 	}
 	return t
+}
+
+// chainLen counts the errors buildTree puts in err's chain, so that the chain is
+// allocated once rather than grown an error at a time.
+func chainLen(err error) int {
+	n := 0
+	for ; err != nil; err = next(err) {
+		n++
+		if _, ok := err.(interface{ Unwrap() []error }); ok {
+			break
+		}
+	}
+	return n
 }
 
 // next returns the error beneath err in its chain, following a seal's hidden cause.
@@ -102,7 +115,7 @@ func ErrorText(err error) (text string, ok bool) {
 // that recorded a call site, read through the errtrace marker so that frames recorded
 // by either package appear.
 func frames(chain []error) []runtime.Frame {
-	var trace []runtime.Frame
+	trace := make([]runtime.Frame, 0, len(chain))
 	for _, err := range slices.Backward(chain) {
 		if f, ok := frame(err); ok {
 			trace = append(trace, f)
