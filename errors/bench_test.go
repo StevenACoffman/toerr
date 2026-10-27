@@ -1,6 +1,7 @@
 package errors_test
 
 import (
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ var (
 	benchBool  bool
 	benchAttrs []slog.Attr
 	benchStr   string
+	benchBytes []byte
 )
 
 type benchMarkerError struct{}
@@ -56,6 +58,14 @@ func BenchmarkWrapWithMessage(b *testing.B) {
 	}
 }
 
+// BenchmarkWrapf adds the Sprintf that fmt.Errorf also pays.
+func BenchmarkWrapf(b *testing.B) {
+	leaf := errors.New("boom")
+	for b.Loop() {
+		errSink = errors.Wrapf(leaf, "context %d", 7)
+	}
+}
+
 func BenchmarkMark(b *testing.B) {
 	b.Run("foreign", func(b *testing.B) {
 		cause, marker := stderrors.New("boom"), stderrors.New("marker")
@@ -69,6 +79,15 @@ func BenchmarkMark(b *testing.B) {
 			errSink = errors.Mark(cause, marker)
 		}
 	})
+}
+
+// BenchmarkSeal records no frame, so it costs one small allocation and no
+// runtime.Callers walk.
+func BenchmarkSeal(b *testing.B) {
+	cause := errors.New("boom")
+	for b.Loop() {
+		errSink = errors.Seal(cause)
+	}
 }
 
 // deepChain is a chain of depth wraps over a leaf, each wrap carrying one attribute,
@@ -126,11 +145,23 @@ func BenchmarkAttrs(b *testing.B) {
 	})
 }
 
+// BenchmarkLogValue measures what a JSON handler pays: LogValue and the MarshalJSON
+// that walks the tree and resolves every frame.
 func BenchmarkLogValue(b *testing.B) {
-	err, _ := deepChain(10)
-	for b.Loop() {
-		benchAttrs = errors.LogValue(err).Group()
-	}
+	b.Run("chain", func(b *testing.B) {
+		err, _ := deepChain(10)
+		for b.Loop() {
+			benchBytes, _ = errors.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+		}
+	})
+	b.Run("join", func(b *testing.B) {
+		left, _ := deepChain(5)
+		right, _ := deepChain(5)
+		err := errors.Wrap(errors.Join(left, right))
+		for b.Loop() {
+			benchBytes, _ = errors.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+		}
+	})
 }
 
 // BenchmarkFormatTrace measures %+v, which resolves every recorded PC to a frame. It runs

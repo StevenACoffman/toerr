@@ -11,6 +11,18 @@ safe to send to a client. Unknown or unset codes fall back to `500` and the stan
 HTTP status text, and it never returns `err.Error()`, so wrapped internal detail is
 not leaked to callers.
 
+The mapping is the one `google/rpc/code.proto` gives each gRPC code, which
+grpc-gateway also uses. A cancelled request answers `499 Client Closed Request`
+(`errhttp.StatusClientClosedRequest`, since `net/http` has no constant for it), and an
+error without a code that wraps `context.Canceled` or `context.DeadlineExceeded`
+answers `499` or `504`, not `500`: the client left, or time ran out.
+
+A proxy that retries on status reads less than the code said. `409` is both
+`AlreadyExists`, which no retry fixes, and `Aborted`, which a retry of the whole
+transaction can, and `504` is a `DeadlineExceeded` that only an idempotent request
+should repeat. Turn proxy retries on only for idempotent routes; see the guide's
+[Deciding Retries at a Boundary](../../philosophy.md#deciding-retries-at-a-boundary).
+
 ## Usage
 
 - `errhttp.Error(err) (int, string)`: map the code attached to `err` to an HTTP
@@ -39,8 +51,8 @@ func handle(w http.ResponseWriter, err error) {
 }
 
 func main() {
-	handle(nil, errcode.WithCode(errcode.StatusPermissionDenied, "you cannot edit this", nil))
-	handle(nil, errcode.WithCode(errcode.StatusNotFound, "", nil)) // no message → default text
+	handle(nil, errcode.New(errcode.StatusPermissionDenied, "you cannot edit this"))
+	handle(nil, errcode.New(errcode.StatusNotFound, "")) // no message → default text
 }
 ```
 

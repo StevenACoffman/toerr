@@ -15,12 +15,12 @@ it took attached:
 
 ```go
 // Standard library: what failed.
-return fmt.Errorf("dial database: %w", err)
-// dial database: connection refused
+return fmt.Errorf("dial database %s: %w", host, err)
+// dial database db1: connection refused
 
 // This package: what failed, and where.
-return errors.WrapWithMessage(err, "dial database")
-// dial database: connection refused
+return errors.Wrapf(err, "dial database %s", host)
+// dial database db1: connection refused
 //
 // main.dialDB
 //     /app/db.go:20
@@ -40,32 +40,47 @@ in production. This is exactly where the state of the world is more complicated 
 path, and also where the engineer reading the log likely did not write the code.
 
 By the time an error surfaces at the top of a handler, it was created deep in some
-dependency and handled by no one on the way up. To act on it, that engineer needs
-three things that the standard library discards as the error travels
-outward:
+dependency and handled by no one on the way up. That engineer can ask three
+questions of it, and a failure leaves a different record for each:
 
-- **Where it happened.** `fmt.Errorf` with `%w` concatenates strings; it keeps
-no file, line, or function. `errors.Is` still works, but "where did this come
+| Record        | Answers                                                  | `fmt.Errorf` keeps | This package adds           |
+| ------------- | -------------------------------------------------------- | ------------------ | --------------------------- |
+| Context chain | What was the program trying to do?                       | the messages       | `slog.Attr` beside each one |
+| Return trace  | Which layers passed the error on instead of handling it? | nothing            | one frame per `New` or wrap |
+| Stack trace   | How did the program reach the creation site?             | nothing            | only for a recovered panic  |
+
+- **The context chain carries intent.** `charge card: authorize payment: connection
+refused` says what failed in the program's own terms, and nothing else does. `%w`
+keeps that chain of messages. But the identifiers and state that explain the failure
+are in scope only near the origin, and a plain string carries them forward only as
+text to grep.
+- **The return trace carries propagation.** Each frame marks a function that saw the
+error and returned it instead of handling it. Without frames, "where did this come
 from?" means grepping the source for message fragments.
-- **What the state was.** The inputs, identifiers, and state that explain the failure
-are in scope only near the origin. A plain error string carries none of it forward
-to where the error is logged.
-- **What kind of failure it is.** Reacting to a category (not found, rate limited,
-retryable) across layers of wrapping takes more than comparing message strings.
+- **The stack trace carries call structure at creation.** It is the record to want
+when the bug is at the creation site, and it is the one this package mostly leaves
+out (see [Return Traces, Not Stack Traces](#return-traces-not-stack-traces)).
 
-This package restores all three: a **return trace** for *where*, structured
-**`slog.Attr`** for *what state*, and type **marks** for *what kind*.
+Apart from the three records, a caller needs to know **what kind of failure it is**.
+Reacting to a category (not found, rate limited, retryable) across layers of wrapping
+takes more than comparing message strings.
+
+This package keeps the **context chain** and adds structured **`slog.Attr`** to it,
+adds the **return trace**, and gives type **marks** and codes for *what kind*.
 
 ## What You Get
 
-- **[Location at every hop](#message-and-location)**: `New` and `Wrap` capture
-file, line, and function.
-- **[Structured context](#structured-attributes)**: every constructor takes
-trailing `slog.Attr` values, surfaced at your log boundary with `errors.LogValue`
-/ `errors.Attrs`.
+- **[Messages that say what was attempted](#messages-and-location)**: `Wrapf` is as
+short as `fmt.Errorf`, and every wrap also records its file, line, and function.
+- **[Structured context](#structured-attributes)**: `New`, `Wrap`, and
+`WrapWithMessage` take trailing `slog.Attr` values, surfaced at your log boundary with
+`errors.LogValue` / `errors.Attrs`.
+- **[Request fields on the success path too](#request-fields)**: `logctx` collects
+fields found anywhere in a request, on its context, for the request's one log line.
 - **[A return trace](#return-trace)** under `%+v`, not a heavyweight stack trace.
 - **[Type marks for control flow](#marks-and-astype)**: `Mark` / `AsType` tag an
-error by type without disturbing its message or `Unwrap` chain.
+error by type without disturbing its message or `Unwrap` chain, and `Seal` does the
+opposite: it hides an error from matching while operators still see all of it.
 - **[A true drop-in](#drop-in-replacement)**: `Is`, `As`, `Unwrap`, `Join`
 re-exported unchanged, and foreign errors interoperate.
 
@@ -76,28 +91,35 @@ package outweigh YAGNI.
 import errors "github.com/StevenACoffman/toerr/errors"
 ```
 
-## Message and Location
+## The Context Chain
+
+### Messages and Location
 
 [`New`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#New) creates a
 leaf error and records the call site.
-[`Wrap`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Wrap) adds the
-current call site to an existing error (no message change).
+[`Wrapf`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Wrapf) prefixes a
+formatted message to an existing error, as `fmt.Errorf` does, and records the call
+site.
 [`WrapWithMessage`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#WrapWithMessage)
-also prefixes a message.
+does the same with a fixed message and trailing attributes.
+[`Wrap`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Wrap) records only
+the call site, for a hop that adds nothing about intent.
 
 ```go
 err := errors.New("connect")
-err = errors.WrapWithMessage(err, "dial database")
-fmt.Println(err) // "dial database: connect"
+err = errors.Wrapf(err, "dial database %s", "db1")
+fmt.Println(err) // "dial database db1: connect"
 ```
 
-Unlike `fmt.Errorf("...: %w", err)`, which only concatenates strings, `New` and
-`Wrap` capture the file, line, and function at the point they are called.
+Write a message wherever the code knows what it was attempting. That message is the
+only record of intent, because a frame names only a function and a line. Unlike
+`fmt.Errorf("...: %w", err)`, which only concatenates strings, every one of these also
+captures the file, line, and function at the point it is called.
 
-## Structured Attributes
+### Structured Attributes
 
-Every constructor takes trailing `slog.Attr` values for context that belongs in
-structured logs rather than in the message:
+`New`, `Wrap`, and `WrapWithMessage` take trailing `slog.Attr` values for context
+that belongs in structured logs rather than in the message:
 
 ```go
 err := errors.New("connect", slog.String("host", "db1"))
@@ -117,20 +139,92 @@ type declared outside this package contributes its own fields by implementing
 `Attrs() []slog.Attr`, the method counterpart of the function, as `Unwrap` is to
 `errors.Unwrap`. That way the fields are not copied into a `Wrap`.
 
-Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight to
-a logger does not auto-expand its fields at every layer. Ask for the grouped form
-explicitly with `errors.LogValue`:
+The flat list repeats a key that two errors both set, such as two siblings in a join.
+To log the error with its shape, ask for it explicitly with
+[`LogValue`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#LogValue):
 
 ```go
-logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("error", errors.LogValue(err)))
 ```
+
+A JSON handler then writes the error as an object. Each error in a chain is a layer
+with its own message, call site, and attributes, and each branch of a join is a tree
+of its own, so two errors' `op` never meet in one object:
+
+```json
+"error": {
+  "msg": "a failed: b failed\nc failed: d failed",
+  "chain": [{"msg": "a failed", "at": "/src/svc.go:40", "attrs": {"op": "a"}}],
+  "errors": [
+    {"chain": [{"msg": "b failed", "at": "/src/db.go:12", "attrs": {"op": "b"}}]},
+    {"chain": [{"msg": "c failed", "at": "/src/cache.go:20", "attrs": {"op": "c"}},
+               {"msg": "d failed", "at": "/src/cache.go:31", "attrs": {"op": "d"}}]}
+  ]
+}
+```
+
+A layer also shows an `errcode` code, an `errclass` class, a `Mark`, and a `Seal`,
+whose hidden cause it still describes. A layer from another package's error, such as a
+`*pq.Error`, also names its Go `type`. Attribute values are resolved first, so a
+`slog.LogValuer` that redacts a secret still redacts it.
+
+With a logger other than slog, such as zerolog's `Interface` or a canonical-line
+library's `Add`, pass the value inside: `errors.LogValue(err).Any()` encodes itself as
+JSON, while the `slog.Value` around it encodes as `{}`.
+
+Errors deliberately do **not** implement `slog.LogValuer` themselves, so passing one
+straight to a logger does not expand it at every layer.
+
+Google's Go client for Cloud Logging decodes a JSON payload into a map, so a repeated
+key keeps one value; `LogValue`'s object repeats none. When those logs are exported to BigQuery, note
+that a column nests at most 13 levels (each join inside a join adds two), that
+numbers become floats (log an ID above 2^53 as a string), and that an attribute key
+must keep one type across call sites.
 
 The reasoning behind carrying `slog.Attr` on the error is in
 [Design → Context as `slog.Attr`](#context-as-slogattr).
 
+### Request Fields
+
+Fields such as the authenticated user or a cache hit describe the whole request, and
+a request that succeeds has no error to carry them. The
+[`logctx`](errors/logctx/) package keeps them on the request's context.
+`logctx.Init` installs a collector where the request starts, `logctx.Add` records a
+field from any layer, and `logctx.Attrs` returns them all for the request's one log
+line, beside the error when it failed:
+
+```go
+func serve(ctx context.Context) (err error) {
+	ctx = logctx.Init(ctx)
+	defer func() {
+		recovered := recover()
+		if p := errors.Recover(recovered); p != nil {
+			err = errclass.WrapAs(p, errclass.Panic)
+		}
+		level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+		if err != nil {
+			level, msg = slog.LevelError, err.Error()
+			attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+		}
+		logger.LogAttrs(ctx, level, msg, attrs...)
+		if recovered != nil {
+			panic(recovered) // net/http, or the goroutine's own recover, still sees it
+		}
+	}()
+	return next(ctx)
+}
+```
+
+The line is written in a `defer`, so a handler that panics still gets it, at error
+level with the panic's stack; the panic then carries on as before.
+
+It is safe for the goroutines a request starts. `logctx.Scope` gives each parallel
+branch a namespace of its own, so two branches' `duration` fields render as
+`shard_3.duration` and `shard_4.duration` instead of overwriting each other.
+
 ## Return Trace
 
-Each `New` and `Wrap` records a single frame for its own call site. Together they
+Each `New` and wrap records a single frame for its own call site. Together they
 form a **return trace**: the path the error took out to the caller, one frame per
 hop, ordered origin-first. Unlike a stack trace, a return trace is captured incrementally, so
 it works even when the error is returned across goroutines. The verbose format
@@ -206,10 +300,25 @@ if _, ok := errors.AsType[*NotFoundError](err); ok {
 }
 ```
 
+[`Seal`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Seal) is the
+opposite of `Mark`. `Mark` adds a match; `Seal` removes every match beneath it, so
+`Is`, `As`, `AsType`, `AsBehavior`, `errcode`, and `errclass` all stop at the seal.
+The message, the `%+v` trace, `Attrs`, and `LogValue` are unchanged. Seal a
+dependency's error where it enters your domain, then mark or code it outside the seal,
+so callers match your meaning and never the dependency's:
+
+```go
+err = errors.Mark(errors.Seal(err), ErrNotFound) // matches ErrNotFound, not sql.ErrNoRows
+```
+
+Seal the cause, not the result: a seal around a mark or a code hides that too.
+
 ## Design
 
-This package makes three decisions that plain `fmt.Errorf` wrapping does not, one
-for each need from [The Problem](#the-problem).
+This package makes three decisions that plain `fmt.Errorf` wrapping does not, each
+about a record from [The Problem](#the-problem). It records a return trace and no
+stack trace, it carries the context chain's evidence as `slog.Attr`, and it keeps an
+error's own structure in typed fields.
 
 ### Return Traces, Not Stack Traces
 
@@ -218,20 +327,22 @@ how it got away.**
 
 An error surfaces at the top of a request handler. It was created deep in some
 dependency, handled by no one on the way up, and is now being read by an on-call
-engineer who did not write the code that produced it. The reader needs two answers:
-where did this come from, and why did nothing deal with it sooner?
+engineer who did not write the code that produced it. The reader needs three answers:
+what was the program trying to do, where did this come from, and why did nothing deal
+with it sooner? The first belongs to the context chain, the messages and attributes,
+and neither kind of trace answers it. The traces split the other two.
 
-A stack trace answers only the first, and it answers it at a cost. It is captured
-once, at creation, for the goroutine that was running then. The instant the error
-is buffered, sent over a channel, or returned from a worker, that recorded stack
-describes a call structure that no longer has anything to do with how the error
-reached you. It is also mechanical and complete. Every runtime and library frame
-is included, so the signal you want, the intent behind your own code, is buried in
-dispatch noise. It also points at the creation site, which the error message has
-often already told you.
-`connection refused` rarely leaves you wondering *what* the operation was.
+A stack trace answers only where it came from, and it answers at a cost. It is
+captured once, at creation, for the goroutine that was running then. The instant the
+error is buffered, sent over a channel, or returned from a worker, that recorded
+stack describes a call structure that no longer has anything to do with how the
+error reached you. It is also complete: every runtime and library frame is included,
+so the frames of your own code are buried in dispatch noise. And it points at the
+creation site, which the context chain has often already named.
+`connect to db1: connection refused` rarely leaves you wondering *what* the operation
+was.
 
-A return trace answers the second question, the one you could not already answer. It
+A return trace answers the last question, the one you could not already answer. It
 is not snapshotted; it is assembled on the way out, one frame per wrap, following
 the error value itself. Because Go errors are values that are passed rather than
 exceptions that are thrown, each frame marks a function that saw the error and chose
@@ -256,14 +367,17 @@ runtime.goexit ┘
 What makes the return trace the more useful side for most production
 errors:
 
-- **It follows the value, not the goroutine.** It stays useful across channels,
-buffers, and worker pools, exactly the cases where a creation-time stack becomes
-useless.
+- **It follows the value, not the goroutine.** Across channels, buffers, and worker
+pools, where a creation-time stack becomes useless, it still shows which layers
+passed the error on. It cannot show which task the error came from: the frames
+after the hop record plumbing, not purpose. Attach the task's identity as a message
+or attribute where the task starts.
 - **Its length is a signal.** The number of frames is the number of layers that
 declined to handle the error. This length is the error's escalation distance. A long return trace is a
 measurement, not merely a location.
-- **It is authored, not mechanical.** Frames appear only where your code wrapped,
-so there is no runtime tail and no dispatch noise to read past.
+- **It is short.** Frames appear only where your code wrapped, so there is no runtime
+tail and no dispatch noise to read past. Each frame is still mechanical, a function
+and a line, so it locates intent in the source without stating it.
 - **It branches.** Combined failures (`errors.Join`) each carry their own return
 path, so the trace renders as a tree. A linear stack cannot express "this failure
 is two independent failures that met here."
@@ -286,16 +400,24 @@ I measured on an Apple M1 Pro, 6 runs each; the numbers barely varied between ru
 | ------------------------------------------- | ----: | ---: | --------: | ------------------------ |
 | `Wrap`                                      |   134 |   64 |         1 | yes                      |
 | `WrapWithMessage`                           |   134 |   64 |         1 | yes                      |
+| `Wrapf`                                     |   200 |   80 |         2 | yes                      |
 | `New`                                       |   135 |   64 |         1 | yes                      |
+| `errcode.New`                               |   136 |   48 |         1 | yes                      |
+| `errcode.Link`                              |   133 |   48 |         1 | yes                      |
+| `errcode.Link` over a `Seal`ed cause        |   148 |   64 |         2 | yes                      |
 | `Mark` on an error that already has a trace |    14 |   32 |         1 | no                       |
+| `Seal`                                      |     9 |   16 |         1 | no                       |
 | `fmt.Errorf("…: %w")`                       |    76 |   48 |         2 | no                       |
 | `runtime.Callers(3, pcs[:1])` alone         |  ~128 |    0 |         0 | (it is the call)         |
 
-These numbers are from Go 1.27.1 on arm64. A copy of the same error struct without the
-frame capture costs 14 ns. The capture itself allocates nothing, so the one allocation
-is the 64-byte error; attributes add a second. Stack depth doesn't change the cost.
-Against `fmt.Errorf`, a 10-hop chain costs about 0.5 µs more to build (1.3 µs against
-0.9 µs), and it uses fewer bytes (640 B against 920 B). It is cheap next to any I/O and
+These numbers are from Go 1.27.1 on arm64, and the `errcode`, `Seal`, and `Wrapf`
+rows from Go 1.27.2 (3 runs each). `Wrapf` adds the `Sprintf` that `fmt.Errorf` also
+pays. A
+copy of the same error struct without the frame capture costs 14 ns. The capture
+itself allocates nothing, so the one allocation is the 64-byte error (48 bytes for a
+coded one); attributes add a second. Stack depth doesn't change the cost. Against
+`fmt.Errorf`, a 10-hop chain costs about 0.5 µs more to build (1.3 µs against 0.9 µs),
+and it uses fewer bytes (640 B against 920 B). It is cheap next to any I/O and
 matters only in hot loops that create and discard errors as normal control flow. Use a
 sentinel there. Reading the trace costs more than building it. On a 10-hop chain, `%+v`
 takes about 4 µs, and `Error()` rebuilds the message on every call, about 0.3 µs each.
@@ -370,19 +492,20 @@ worth knowing before you adopt it.
   adds information.
 - **Log once, not per layer.** Errors do not implement `slog.LogValuer`, so they do
   not auto-expand when logged. Log the error once, at a single top-level handler,
-  with `errors.Attrs` / `errors.LogValue`. Lower layers wrap (for location) and
-  return, not log.
-- **Do not leak dependencies at boundaries.** `WithCode` keeps the cause matchable;
-  use `WithCodeOpaque` when translating a dependency error you do not want callers
-  coupling to.
+  with `errors.LogValue`. Lower layers wrap (for location) and
+  return, not log. A field a lower layer wants in that line goes to `logctx.Add`,
+  which is how a canonical log line gets built without a log call per layer.
+- **Do not leak dependencies at boundaries.** `errcode.Link` keeps the cause
+  matchable; `errors.Seal` the cause first when translating a dependency error you do
+  not want callers coupling to.
 - **Not every project needs this.** For a small library or CLI, the standard library
   plus disciplined `fmt.Errorf` wrapping is usually enough. This package earns its
   keep in larger, long-lived services where the debugging cost of thin errors is
   real.
-- An error can be planful state and it doesn't necessarily mean something went wrong. 
-  It carries semantic meaning that may not change until the API changes. If an error has 
+- An error can be planful state and it doesn't necessarily mean something went wrong.
+  It carries semantic meaning that may not change until the API changes. If an error has
   no locus (clear point of origin or structural anchor) then associating a trace makes
-  no sense. If an error is a normal operational result used as a standard 
+  no sense. If an error is a normal operational result used as a standard
   control-flow value or an opaque, lightweight "domain value", use a simple sentinel.
 
 None of this makes the package wrong. It makes the trade-off explicit. If your
@@ -393,30 +516,90 @@ synchronous, you may not need it.
 
 - Replace the import `errors` with `github.com/StevenACoffman/toerr/errors`.
 - `Is`, `As`, `Unwrap`, and `Join` are re-exported unchanged.
-- Replace `fmt.Errorf("some message: %w", err)` with
-`errors.WrapWithMessage(err, "some message")` to gain location and attributes.
+- Replace `fmt.Errorf("load %q: %w", path, err)` with
+`errors.Wrapf(err, "load %q", path)` to gain location. Where logs should query an
+identifier, move it into an attribute:
+`errors.WrapWithMessage(err, "charge card", slog.Int("order", id))`.
 - Use the `sentinel` package for package-level sentinel values.
+
+### Linting an Adopting Project
+
+`wrapcheck` reports an error from another package that is returned without a wrap.
+It already counts `Wrap`, `Wrapf`, `errors.New`, and `Join` as wraps. Add the rest of
+this package's constructors to your `.golangci.yaml`:
+
+```yaml
+linters:
+  settings:
+    wrapcheck:
+      extra-ignore-sigs:
+        - .WrapWithMessage(
+        - .Mark(
+        - errcode.New(
+        - .Link(
+        - .WithCode(       # deprecated; drop once migrated to Link
+        - .WithCodeOpaque( # deprecated; drop once migrated to Link
+        - errclass.WrapAs(
+        - errgrpc.Error(
+```
+
+Leave `.Seal(` out. A seal records no frame, so a bare `return errors.Seal(err)` is a
+hop with no location, which is what `wrapcheck` should report; wrap it with `Link`,
+`Mark`, or `Wrap`.
+
+To log once, `forbidigo` reports a `log/slog` call outside your boundary packages,
+whether a package function or a `*slog.Logger` method:
+
+```yaml
+linters:
+  enable: [forbidigo]
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^(slog\.|\*?slog\.Logger\.)(Debug|Info|Warn|Error|Log)(Context|Attrs)?$
+          pkg: ^log/slog$
+          msg: log at the boundary; record a field with logctx.Add and return the error
+  exclusions:
+    rules:
+      - path: ^(cmd|internal/server)/ # your boundary packages
+        linters: [forbidigo]
+```
+
+It does not see a call through an interface or your own logging wrapper (add a
+pattern for its package), or another logger such as zap. A goroutine or background
+job is a boundary of its own: add its path, or a `//nolint:forbidigo` with the reason.
 
 ## Subpackages
 
-| Package    | Purpose                                                                   |
-| ---------- | ------------------------------------------------------------------------- |
-| `errors`   | Primary API: `New`, `Wrap`, `WrapWithMessage`, `Mark`, `AsType`, `Attrs`. |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.               |
-| `errcode`  | Transport-neutral status codes (`WithCode`/`Code`/`Status`/`Message`).    |
-| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.         |
-| `errclass` | Coarse severity classification that folds across joined errors.           |
+| Package    | Purpose                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `errors`   | Primary API: `New`, `Wrap`, `Wrapf`, `WrapWithMessage`, `Mark`, `Seal`, `AsType`, `Attrs`, `LogValue`. |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                                            |
+| `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).                               |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                                      |
+| `errgrpc`  | gRPC adapter for `errcode`, in both directions. A module of its own.                                   |
+| `errpgx`   | PostgreSQL adapter for `errcode`: maps a pgx error or SQLSTATE to a domain code. A module of its own.  |
+| `logctx`   | Request-scoped log fields for the request's one log line, on success and failure.                      |
+| `errclass` | Coarse severity classification that folds across joined errors.                                        |
 
 Each subpackage has its own README:
 
 - [`sentinel`](errors/sentinel/): stack-free sentinels that match by identity.
 - [`errcode`](errors/errcode/): attach transport-neutral status codes to errors.
 - [`errhttp`](errors/errhttp/): map a coded error to an HTTP status and safe message.
+- [`errgrpc`](errors/errgrpc/): map a coded error to a gRPC status, and a client
+  call's code back to a domain code.
+- [`errpgx`](errors/errpgx/): map an error from pgx to the domain code that tells
+  its caller what to do.
+- [`logctx`](errors/logctx/): collect a request's log fields and write them once.
 - [`errclass`](errors/errclass/): classify error severity for retry decisions.
 
 ## Prior Art
 
 - [Failure is Your Domain](https://www.gobeyond.dev/failure-is-your-domain/) - Philosophy of Errors
+- [Ow! My Foot!](https://n8z.dev/posts/ow-my-foot) - errors across languages, error
+  domains and blast radius, and the rakes stepped on
 - [braces.dev/errtrace](https://github.com/bracesdev/errtrace) - the Zig style return trace
 - [remko/go-errors](https://github.com/remko/go-errors): the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)

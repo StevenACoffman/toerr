@@ -22,6 +22,14 @@ type attrTree struct {
 	children []attrTree
 }
 
+// sealChain is a chain of Wrap, Mark, and Seal over a root, with the matches it should allow:
+// the root only if nothing sealed it, and the markers added after the last seal.
+type sealChain struct {
+	root, err       error
+	rootVisible     bool
+	visible, hidden []error
+}
+
 // foreignError is an error type declared outside the errors package that surfaces its own
 // fields through the Attrs method rather than by being wrapped.
 type foreignError struct{ attrs []slog.Attr }
@@ -100,9 +108,11 @@ func TestWrapWithMessageComposesOutermostFirst(t *testing.T) {
 	})
 }
 
-// TestTraceHasOneFramePerHop checks that %+v records exactly one frame for each New, Wrap and
-// WrapWithMessage in the chain, plus one for a Mark that had to give a foreign error a frame,
-// and none for a Mark of an error that already had one.
+// TestTraceHasOneFramePerHop checks that %+v records exactly one frame for each New, Wrap,
+// WrapWithMessage and Wrapf in the chain, plus one for a Mark that had to give a foreign error a
+// frame,
+// and none for a Mark of an error that already had one. A Seal adds none, and hides the frames
+// behind it from Mark, so a Mark just outside a seal records one.
 //
 // The trace is a return trace, not a stack trace: a frame per hop is the whole promise. An
 // extra frame is a captured stack leaking in; a missing one is a hop the trace walk skipped.
@@ -118,19 +128,28 @@ func TestTraceHasOneFramePerHop(t *testing.T) {
 			err = stderrors.New("origin")
 		}
 
-		ops := rapid.SliceOfN(rapid.SampledFrom([]string{"wrap", "message", "mark"}), 1, 8).
-			Draw(t, "ops")
+		ops := rapid.SliceOfN(
+			rapid.SampledFrom([]string{"wrap", "message", "wrapf", "mark", "seal"}), 1, 8,
+		).Draw(t, "ops")
 		for _, op := range ops {
 			switch op {
 			case "wrap":
 				err = errors.Wrap(err)
 			case "message":
 				err = errors.WrapWithMessage(err, "context")
+			case "wrapf":
+				err = errors.Wrapf(err, "context %d", len(ops))
 			case "mark":
 				err = errors.Mark(err, stderrors.New("marker"))
 				if traced {
 					continue
 				}
+			case "seal":
+				// A seal is not a hop, and Mark cannot see the frames behind it, so the
+				// next Mark records one.
+				err = errors.Seal(err)
+				traced = false
+				continue
 			}
 			want++
 			traced = true
@@ -139,6 +158,58 @@ func TestTraceHasOneFramePerHop(t *testing.T) {
 		trace := fmt.Sprintf("%+v", err)
 		if got := strings.Count(trace, ".go:"); got != want {
 			t.Fatalf("ops %v: got %d frames, want %d:\n%s", ops, got, want, trace)
+		}
+	})
+}
+
+// TestSealHidesEverythingBeneathFromMatching checks that after any sequence of Wrap, Mark,
+// and Seal, errors.Is reaches a marker exactly when it was added after the last seal, reaches
+// the root exactly when nothing sealed it, and the message never changes.
+//
+// This is the contract a boundary relies on: whatever a dependency's error carried, callers
+// can match only what the boundary attached outside the seal.
+func TestSealHidesEverythingBeneathFromMatching(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		c := genSealChain().Draw(t, "chain")
+
+		if c.err.Error() != c.root.Error() {
+			t.Fatalf("message changed: got %q, want %q", c.err.Error(), c.root.Error())
+		}
+		if errors.Is(c.err, c.root) != c.rootVisible {
+			t.Fatalf("errors.Is(err, root) = %v, want %v", !c.rootVisible, c.rootVisible)
+		}
+		for _, marker := range c.visible {
+			if !errors.Is(c.err, marker) {
+				t.Fatalf("errors.Is lost %q, added outside every seal", marker)
+			}
+		}
+		for _, marker := range c.hidden {
+			if errors.Is(c.err, marker) {
+				t.Fatalf("errors.Is reaches %q through a seal", marker)
+			}
+		}
+	})
+}
+
+// TestSealKeepsTheOperatorView checks that sealing any error tree, joins and foreign Attrs
+// types included, changes none of what an operator reads: the message, every attribute in
+// order, and every frame of the %+v trace.
+func TestSealKeepsTheOperatorView(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		_, tree := genAttrTree(3).Draw(t, "tree").build()
+		// Both go under a Wrap so both print through this package's renderer: a bare
+		// Join or foreign error would not print its frames at all.
+		err, sealed := errors.Wrap(tree), errors.Wrap(errors.Seal(tree))
+
+		if sealed.Error() != err.Error() {
+			t.Fatalf("message changed: got %q, want %q", sealed.Error(), err.Error())
+		}
+		if got, want := keys(errors.Attrs(sealed)), keys(errors.Attrs(err)); got != want {
+			t.Fatalf("Attrs changed: got %s, want %s", got, want)
+		}
+		got, want := fmt.Sprintf("%+v", sealed), fmt.Sprintf("%+v", err)
+		if strings.Count(got, ".go:") != strings.Count(want, ".go:") {
+			t.Fatalf("frames changed:\ngot:\n%s\nwant:\n%s", got, want)
 		}
 	})
 }
@@ -184,6 +255,29 @@ func genRoot() *rapid.Generator[error] {
 			return stderrors.New(msg)
 		}
 		return errors.New(msg, genAttrs().Draw(t, "rootAttrs")...)
+	})
+}
+
+func genSealChain() *rapid.Generator[sealChain] {
+	return rapid.Custom(func(t *rapid.T) sealChain {
+		c := sealChain{root: genRoot().Draw(t, "root"), rootVisible: true}
+		c.err = c.root
+		for i, op := range rapid.SliceOfN(rapid.SampledFrom([]string{"wrap", "mark", "seal"}), 0, 8).
+			Draw(t, "ops") {
+			switch op {
+			case "wrap":
+				c.err = errors.Wrap(c.err)
+			case "mark":
+				marker := fmt.Errorf("marker %d", i)
+				c.visible = append(c.visible, marker)
+				c.err = errors.Mark(c.err, marker)
+			case "seal":
+				c.err = errors.Seal(c.err)
+				c.rootVisible = false
+				c.hidden, c.visible = append(c.hidden, c.visible...), nil
+			}
+		}
+		return c
 	})
 }
 

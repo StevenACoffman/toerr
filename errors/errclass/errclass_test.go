@@ -1,9 +1,11 @@
 package errclass_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errclass"
 )
 
@@ -53,6 +55,30 @@ func TestErrClass(t *testing.T) {
 				t.Errorf("unexpected error class: want: %s got %s", tc.class, class)
 			}
 		})
+	}
+}
+
+func TestClassString(t *testing.T) {
+	cases := map[errclass.Class]string{
+		errclass.Nil:        "nil",
+		errclass.Unknown:    "unknown",
+		errclass.Transient:  "transient",
+		errclass.Persistent: "persistent",
+		errclass.Panic:      "panic",
+		errclass.Class(5):   "unknown",
+	}
+	for class, want := range cases {
+		if got := class.String(); got != want {
+			t.Errorf("Class(%d).String() = %q, want %q", int(class), got, want)
+		}
+	}
+}
+
+// Classifying nothing is still nothing, so `return errclass.WrapAs(err, c)` is safe
+// on the success path.
+func TestWrapAsNil(t *testing.T) {
+	if err := errclass.WrapAs(nil, errclass.Transient); err != nil {
+		t.Errorf("WrapAs(nil, Transient) = %v, want nil", err)
 	}
 }
 
@@ -187,5 +213,41 @@ func TestErrClassJoined(t *testing.T) {
 				t.Errorf("unexpected error class: want: %s got %s", tc.expectedClass, class)
 			}
 		})
+	}
+}
+
+// A boundary judges the class itself, so a seal must hide the class beneath it and
+// leave the one set outside it.
+func TestSealHidesTheClassBeneath(t *testing.T) {
+	inner := errclass.WrapAs(errTest, errclass.Transient)
+	cases := map[string]struct {
+		err  error
+		want errclass.Class
+	}{
+		"unsealed": {toerr.Wrap(inner), errclass.Transient},
+		"sealed":   {toerr.Wrap(toerr.Seal(inner)), errclass.Unknown},
+		"reclassified outside the seal": {
+			errclass.WrapAs(toerr.Seal(inner), errclass.Persistent),
+			errclass.Persistent,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := errclass.GetClass(tc.err); got != tc.want {
+				t.Errorf("GetClass = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// errors.LogValue gives a classified error a layer that names the class.
+func TestLogValueShowsTheClass(t *testing.T) {
+	err := errclass.WrapAs(errTest, errclass.Transient)
+
+	data, _ := toerr.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+	want := `{"msg":"this is a test error","chain":[{"class":"transient"},` +
+		`{"msg":"this is a test error","type":"*errors.errorString"}]}`
+	if string(data) != want {
+		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}
 }

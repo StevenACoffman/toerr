@@ -67,6 +67,7 @@ func TestWrapPreservesChainAndCollectsAttrs(t *testing.T) {
 	wrapped := errors.Wrap(leaf, slog.String("op", "read"))
 
 	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
+	equals(t, leaf, errors.Unwrap(wrapped))
 
 	// Attrs are collected outermost-first: the wrap's attr precedes the leaf's.
 	attrs := errors.Attrs(wrapped)
@@ -107,40 +108,6 @@ func renderLog(emit func(*slog.Logger)) string {
 	return buf.String()
 }
 
-func TestLogValueGroupsMessageAndAttrs(t *testing.T) {
-	err := errors.New("disk full", slog.String("device", "sda1"))
-
-	// The explicit boundary helper returns a group of the message plus chain attrs.
-	v := errors.LogValue(err)
-	equals(t, slog.KindGroup, v.Kind())
-	var gotMsg, gotDevice bool
-	for _, a := range v.Group() {
-		switch a.Key {
-		case "msg":
-			equals(t, "disk full", a.Value.String())
-			gotMsg = true
-		case "device":
-			equals(t, "sda1", a.Value.String())
-			gotDevice = true
-		}
-	}
-	assert(t, gotMsg, "LogValue group should carry the message")
-	assert(t, gotDevice, "LogValue group should carry the attr")
-
-	// Rendered at a boundary, the grouped form carries both.
-	out := renderLog(
-		func(l *slog.Logger) {
-			l.InfoContext(t.Context(), "operation failed", slog.Any("err", errors.LogValue(err)))
-		},
-	)
-	assert(
-		t,
-		strings.Contains(out, "disk full"),
-		"grouped form should carry the message, got: "+out,
-	)
-	assert(t, strings.Contains(out, "sda1"), "grouped form should carry the attr, got: "+out)
-}
-
 // TestErrorDoesNotAutoExpandInSlog pins the deliberate behavior: these errors do not
 // implement slog.LogValuer, so passing one straight to a logger does not expand its
 // attributes — callers use LogValue/Attrs at the boundary instead.
@@ -157,6 +124,7 @@ func TestErrorDoesNotAutoExpandInSlog(t *testing.T) {
 func TestNilInputsReturnNil(t *testing.T) {
 	assert(t, errors.Wrap(nil) == nil, "Wrap(nil) should be nil")
 	assert(t, errors.WrapWithMessage(nil, "m") == nil, "WrapWithMessage(nil, ...) should be nil")
+	assert(t, errors.Wrapf(nil, "m %d", 1) == nil, "Wrapf(nil, ...) should be nil")
 	assert(t, errors.Mark(nil, errors.New("m")) == nil, "Mark(nil, ...) should be nil")
 }
 
@@ -167,6 +135,22 @@ func TestWrapWithMessage(t *testing.T) {
 	equals(t, "reading config: leaf", wrapped.Error())
 	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
 	equals(t, 2, len(errors.Attrs(wrapped)))
+}
+
+// Wrapf is WrapWithMessage with a formatted message, so it must behave the same way
+// apart from the formatting.
+func TestWrapf(t *testing.T) {
+	leaf := errors.New("leaf", slog.Int("id", 1))
+	wrapped := errors.Wrapf(leaf, "load config %q (attempt %d)", "/etc/app.yaml", 2)
+
+	equals(t, `load config "/etc/app.yaml" (attempt 2): leaf`, wrapped.Error())
+	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
+	equals(t, 1, len(errors.Attrs(wrapped)))
+
+	trace := fmt.Sprintf("%+v", wrapped)
+	equals(t, 2, countFrames(trace))
+	assert(t, strings.Contains(trace, "TestWrapf"),
+		"Wrapf should record its caller's frame:\n"+trace)
 }
 
 func TestJoinRendersEveryBranch(t *testing.T) {

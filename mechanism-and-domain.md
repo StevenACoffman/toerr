@@ -20,9 +20,11 @@ knowledge about your domain:
 
 - capturing the call site and building a return trace (`errors.New`, `errors.Wrap`);
 - carrying structured context as `slog.Attr` and rendering it for logs;
+- collecting a request's log fields on its context (`logctx`);
 - a container that holds a status code, a user message, and a cause (`errcode`);
 - the three role-based views: application code, end user, operator;
-- transport adapters that map a code to a status (`errhttp`).
+- transport adapters that map a code to a status (`errhttp`, `errgrpc`), and a
+  dependency adapter that maps a driver's error to a code (`errpgx`).
 
 None of that encodes what *your* failures are. It is plumbing.
 
@@ -62,11 +64,11 @@ Translate and code at the boundary, in terms your domain defines:
 func (s *Store) ReserveSeat(ctx context.Context, id int) error {
 	if err := s.insert(ctx, id); err != nil {
 		if isUniqueViolation(err) {
-			// external error -> domain condition -> transport-neutral code + message
-			return errcode.WithCode(errcode.StatusAlreadyExists,
-				"that seat is already taken", errors.Wrap(err))
+			// external error -> sealed -> transport-neutral code + message
+			return errcode.Link(errcode.StatusAlreadyExists,
+				"that seat is already taken", errors.Seal(err))
 		}
-		return errcode.WithCode(errcode.StatusInternal, "", errors.Wrap(err))
+		return errcode.Link(errcode.StatusInternal, "", err)
 	}
 	return nil
 }
@@ -78,17 +80,17 @@ the user sees the message, the operator sees the trace), exactly as in
 
 ## On Error Codes: Start Small
 
-`errcode` includes a generic set drawn from HTTP and gRPC. Treat it the way Ben
-Johnson does. Begin with the few codes you actually need, and grow the set only when
+`errcode` includes a generic set, gRPC's canonical codes apart from `OK`. Treat it
+the way Ben Johnson does. Begin with the few codes you actually need, and grow the set only when
 a caller must branch on a distinction it cannot yet make. If your domain needs a
 category the generic set does not capture, do not stretch a status to fit; name it
 with a domain sentinel or a `Mark`, which live in your package and mean exactly
 what you say they mean.
 
-A fully domain-owned code *type*, a generic `WithCode[C]` parameterized over your
+A fully domain-owned code *type*, a generic `Link[C]` parameterized over your
 own `Code` type, is also possible but rarely worth it. It costs a type
 parameter at every extraction site (`Status[myapp.Code](err)`, which fails silently
-if you name the wrong type) and forfeits the ready-made `errhttp` adapter, since the
+if you name the wrong type) and forfeits the ready-made `errhttp` and `errgrpc` adapters, since the
 library can no longer map a code type it does not know. Reach for a sentinel or a
 `Mark` first; prefer a generic coded type only when you have many domain categories
 that must all round-trip as one strongly-typed set.

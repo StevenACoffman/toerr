@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"runtime"
-	"slices"
-	"strings"
+
+	"github.com/StevenACoffman/toerr/errors/internal/trace"
 )
 
 // Compile-time checks. TracePC is the errtrace-compatible trace marker.
@@ -17,10 +16,12 @@ var (
 	_ interface{ TracePC() uintptr } = (*annotatedError)(nil)
 
 	_ interface{ Attrs() []slog.Attr } = (*annotatedError)(nil)
+	_ trace.Describer                  = (*annotatedError)(nil)
 
 	_ error                          = (*marked)(nil)
 	_ fmt.Formatter                  = (*marked)(nil)
 	_ interface{ TracePC() uintptr } = (*marked)(nil)
+	_ trace.Describer                = (*marked)(nil)
 )
 
 // annotatedError is both the leaf (New) and the wrapper (Wrap): a leaf sets msg,
@@ -40,17 +41,9 @@ type marked struct {
 	marker error
 }
 
-// traceTree represents an error and its return trace as a tree. Children are the
-// branches of a multi-error (errors.Join); a single-cause chain has none.
-type traceTree struct {
-	err      error
-	trace    []runtime.Frame // origin-first
-	children []traceTree
-}
-
 // New creates a leaf error, recording this call site and attrs.
 func New(msg string, attrs ...slog.Attr) error {
-	return &annotatedError{msg: msg, pc: callerPC(), attrs: attrs}
+	return &annotatedError{msg: msg, pc: trace.CallerPC(), attrs: attrs}
 }
 
 // Wrap annotates err with this call site and attrs. Returns nil if err is nil.
@@ -58,7 +51,7 @@ func Wrap(err error, attrs ...slog.Attr) error {
 	if err == nil {
 		return nil
 	}
-	return &annotatedError{cause: err, pc: callerPC(), attrs: attrs}
+	return &annotatedError{cause: err, pc: trace.CallerPC(), attrs: attrs}
 }
 
 // WrapWithMessage is Wrap with an additional message prepended to err's message
@@ -67,7 +60,23 @@ func WrapWithMessage(err error, message string, attrs ...slog.Attr) error {
 	if err == nil {
 		return nil
 	}
-	return &annotatedError{msg: message, cause: err, pc: callerPC(), attrs: attrs}
+	return &annotatedError{msg: message, cause: err, pc: trace.CallerPC(), attrs: attrs}
+}
+
+// Wrapf is WrapWithMessage with the message formatted by fmt.Sprintf, so a wrap that
+// says what was being attempted is as short to write as fmt.Errorf:
+//
+//	return errors.Wrapf(err, "load config %q", path)
+//
+// It takes no attributes, because the variadic arguments belong to the format; use
+// WrapWithMessage to attach both. Do not use %w: err is already the cause. go vet
+// reports a %w in the format, as it does for any Sprintf wrapper. Returns nil if err
+// is nil.
+func Wrapf(err error, format string, args ...any) error {
+	if err == nil {
+		return nil
+	}
+	return &annotatedError{msg: fmt.Sprintf(format, args...), cause: err, pc: trace.CallerPC()}
 }
 
 // Mark tags err with marker so that Is(err, marker) is true and AsType[T](err)
@@ -86,7 +95,7 @@ func Mark(err error, marker error) error {
 		return nil
 	}
 	if !hasTrace(err) {
-		err = &annotatedError{cause: err, pc: callerPC()} // foreign error: give it a frame.
+		err = &annotatedError{cause: err, pc: trace.CallerPC()} // foreign error: give it a frame.
 	}
 	return &marked{cause: err, marker: marker}
 }
@@ -107,7 +116,8 @@ func AsType[T error](err error) (T, bool) {
 //
 // the method counterpart to this function, as Unwrap, Is, and As are to theirs.
 // The errors this package creates implement it; an error type declared elsewhere
-// can too, surfacing its own fields without being wrapped to copy them.
+// can too, surfacing its own fields without being wrapped to copy them. Like
+// errors.Is, it does not guard against an Unwrap cycle.
 func Attrs(err error) []slog.Attr {
 	var attrs []slog.Attr
 	walkTree(err, func(e error) {
@@ -174,6 +184,11 @@ func (e *annotatedError) Format(s fmt.State, verb rune) { formatError(e, s, verb
 // package-level Attrs collects them along the whole chain.
 func (e *annotatedError) Attrs() []slog.Attr { return e.attrs }
 
+// DescribeLayer gives LogValue this error's own message and attributes.
+func (e *annotatedError) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Msg: e.msg, Attrs: e.attrs}
+}
+
 func (m *marked) Error() string { return m.cause.Error() }
 
 func (m *marked) Unwrap() error { return m.cause }
@@ -184,6 +199,13 @@ func (m *marked) Unwrap() error { return m.cause }
 func (m *marked) TracePC() uintptr { return 0 }
 
 func (m *marked) Format(s fmt.State, verb rune) { formatError(m, s, verb) }
+
+// DescribeLayer gives LogValue the marker's text, or its type when the text says
+// nothing: a typed marker such as &RateLimitError{} often embeds a nil error, and its
+// Error method then panics or returns "".
+func (m *marked) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Mark: markerText(m.marker)}
+}
 
 // Is reports the marker's identity to errors.Is, so a sentinel marker matches.
 func (m *marked) Is(target error) bool { return Is(m.marker, target) }
@@ -202,21 +224,13 @@ func hasTrace(err error) bool {
 	return false
 }
 
-// callerPC records the PC of whoever called the exported New/Wrap/Mark.
-// skip: 0=Callers, 1=callerPC, 2=New/Wrap/Mark, 3=the caller.
-func callerPC() uintptr {
-	var pcs [1]uintptr
-	runtime.Callers(3, pcs[:]) //nolint:mnd // skip Callers, callerPC, and the exported entry point.
-	return pcs[0]
-}
-
 // formatError implements fmt.Formatter for the package error types.
 // %+v prints the return trace; %v and %s print the message; %q quotes it.
 func formatError(err error, s fmt.State, verb rune) {
 	switch verb {
 	case 'v':
 		if s.Flag('+') {
-			_, _ = io.WriteString(s, formatTrace(err))
+			_, _ = io.WriteString(s, trace.Format(err))
 			return
 		}
 		_, _ = io.WriteString(s, err.Error())
@@ -227,133 +241,60 @@ func formatError(err error, s fmt.State, verb rune) {
 	}
 }
 
-// LogValue renders err as a slog group of its message plus every attribute in its
-// chain (msg, then Attrs). It is an explicit boundary helper: these errors deliberately
-// do NOT implement slog.LogValuer, so passing an error to a logger does not auto-expand
-// into structured fields at every layer (which invites the stacked-logline anti-pattern).
-// Instead, log the error once, where you handle it, e.g.
+// LogValue renders err for a structured log line, as a JSON object that keeps the
+// shape of its tree. A JSON handler nests it under the attribute's key:
 //
-//	slog.Any("err", errors.LogValue(err))          // the grouped form, or
-//	logger.LogAttrs(ctx, lvl, err.Error(), errors.Attrs(err)...) // the flat form
+//	logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("error", errors.LogValue(err)))
 //
-// It works for any error; a foreign error yields a group with just the message.
+// For errors.Wrap(errors.Join(b, c), …) with c wrapping d, the object is
+//
+//	{"msg": "<err.Error()>",
+//	 "chain": [{"msg": "a failed", "at": "/src/svc.go:40", "attrs": {"op": "a"}}],
+//	 "errors": [
+//	   {"chain": [{"msg": "b failed", "at": "/src/db.go:12", "attrs": {"op": "b"}}]},
+//	   {"chain": [{"msg": "c failed", "at": "/src/cache.go:20", "attrs": {"op": "c"}},
+//	              {"msg": "d failed", "at": "/src/cache.go:31", "attrs": {"op": "d"}}]}]}
+//
+// A chain lists every error from the outside in, down to a join or the root cause, and
+// each branch of the join gets a tree of its own under "errors". The join is the
+// chain's last layer only when it reports something of its own, such as attributes.
+// The walk is the one %+v takes, so the "at" fields are the return trace.
+//
+// Each layer keeps its own message, call site, and attributes, so no key collides with
+// another error's, however many siblings set it. A layer also carries "code" and
+// "class" from errcode and errclass, "mark" from Mark, and "sealed" from Seal, whose
+// cause it still shows. A layer from another package's error also carries its Go
+// "type", such as "*pq.Error"; toerr's own layers do not. Empty fields are left out.
+// Within one layer a repeated key keeps its first position and takes its last value.
+//
+// Attribute values are resolved, so a slog.LogValuer that redacts still redacts, and
+// are encoded as slog's JSON handler encodes them. An error from another package is
+// described by its Error, Unwrap, and Attrs methods.
+//
+// The value is neither an error nor a slog.LogValuer, so handlers encode it with its
+// MarshalJSON; a text handler writes the same JSON as a string. A ReplaceAttr function
+// sees it as one value and cannot reach inside it. For the flat list of attributes,
+// use Attrs.
+//
+// A logger other than slog, or encoding/json, needs the value inside:
+// errors.LogValue(err).Any() is the json.Marshaler. The slog.Value itself has no
+// exported fields, so encoding/json writes it as {}. Like errors.Is, LogValue does
+// not guard against an Unwrap cycle.
+//
+// These errors deliberately do not implement slog.LogValuer, so passing one to a
+// logger does not expand it at every layer; log it once, where it is handled. A nil
+// err gives the zero Value.
 func LogValue(err error) slog.Value {
-	return slog.GroupValue(append([]slog.Attr{slog.String("msg", err.Error())}, Attrs(err)...)...)
+	if err == nil {
+		return slog.Value{}
+	}
+	return slog.AnyValue(trace.NewJSONTree(err))
 }
 
-func formatTrace(err error) string {
-	var b strings.Builder
-	writeTree(&b, buildTraceTree(err), nil)
-	return b.String()
-}
-
-// buildTraceTree builds a trace tree from an error, following the single-cause
-// chain and splitting into children at a multi-error. Mirrors errtrace's
-// implementation.
-func buildTraceTree(err error) traceTree {
-	current := traceTree{err: err}
-loop:
-	for {
-		if frame, ok, inner := unwrapFrame(err); ok {
-			current.trace = append(current.trace, frame)
-			err = inner
-			continue
-		}
-
-		// Inspect this node's own Unwrap shape (single vs multi) to build the
-		// tree; do not use errors.As, which would traverse the whole chain.
-		switch x := err.(type) { //nolint:errorlint // deliberate single-node inspection.
-		case interface{ Unwrap() error }:
-			err = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			errs := x.Unwrap()
-			current.children = make([]traceTree, 0, len(errs))
-			for _, e := range errs {
-				current.children = append(current.children, buildTraceTree(e))
-			}
-			break loop
-
-		default:
-			break loop
-		}
+// markerText returns marker's Error text, or its type name if Error panics or returns "".
+func markerText(marker error) string {
+	if text, ok := trace.ErrorText(marker); ok && text != "" {
+		return text
 	}
-
-	slices.Reverse(current.trace)
-	return current
-}
-
-// unwrapFrame unwraps the outermost trace frame from err, returning the frame,
-// whether one was present, and the inner error. Mirrors errtrace.UnwrapFrame so
-// both packages read each other's frames.
-func unwrapFrame(err error) (frame runtime.Frame, ok bool, inner error) {
-	e, ok := err.(interface{ TracePC() uintptr })
-	if !ok {
-		return runtime.Frame{}, false, err
-	}
-	inner = stderrors.Unwrap(err)
-	f, _ := runtime.CallersFrames([]uintptr{e.TracePC()}).Next()
-	if f == (runtime.Frame{}) {
-		return runtime.Frame{}, false, inner
-	}
-	return f, true, inner
-}
-
-// writeTree writes the tree depth-first: children (deepest branches) first, then
-// the node's own message and trace. path indexes the branch nesting.
-func writeTree(b *strings.Builder, t traceTree, path []int) {
-	for i, child := range t.children {
-		writeTree(b, child, append(path, i))
-	}
-	writeTrace(b, t.err, t.trace, path)
-}
-
-func writeTrace(b *strings.Builder, err error, trace []runtime.Frame, path []int) {
-	// The message may have newlines in it, so print each line separately.
-	for i, line := range strings.Split(err.Error(), "\n") {
-		if i == 0 {
-			pipes(b, path, "+- ")
-		} else {
-			pipes(b, path, "|  ")
-		}
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	if len(trace) > 0 {
-		// Empty line between the message and the trace.
-		pipes(b, path, "|  ")
-		b.WriteString("\n")
-
-		for _, frame := range trace {
-			pipes(b, path, "|  ")
-			b.WriteString(frame.Function)
-			b.WriteString("\n")
-
-			pipes(b, path, "|  ")
-			_, _ = fmt.Fprintf(b, "\t%s:%d\n", frame.File, frame.Line)
-		}
-	}
-
-	// Connecting "|" line between sibling traces.
-	if len(path) > 0 {
-		pipes(b, path, "|  ")
-		b.WriteString("\n")
-	}
-}
-
-// pipes draws the "| | |" gutter prefix. path leads to the current node; last is
-// this node's own connector ("+- " or "|  "). A 0 index is a first child with
-// nothing above to connect to, so its column is blank.
-func pipes(b *strings.Builder, path []int, last string) {
-	for depth, idx := range path {
-		switch {
-		case depth == len(path)-1:
-			b.WriteString(last)
-		case idx == 0:
-			b.WriteString("   ")
-		default:
-			b.WriteString("|  ")
-		}
-	}
+	return fmt.Sprintf("%T", marker)
 }

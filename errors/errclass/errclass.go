@@ -1,6 +1,10 @@
 package errclass
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/StevenACoffman/toerr/errors/internal/trace"
+)
 
 // These are the allowed error classifications.
 // The values are arbitrary but provide a strict ordering,
@@ -8,14 +12,26 @@ import "errors"
 // When determining the class of a joined error, the highest
 // class is returned.
 const (
-	Nil     Class = -1
+	// Nil is the class of a nil error.
+	Nil Class = -1
+	// Unknown is the class of an error nothing classified.
 	Unknown Class = 0
 
-	Transient  Class = 100
+	// Transient means the same operation may succeed if tried again.
+	Transient Class = 100
+	// Persistent means trying again cannot help.
 	Persistent Class = 110
 
+	// Panic marks an error recovered from a panic. errors.Recover does not set it,
+	// because the root errors package imports none of its subpackages; classify the
+	// recovered error yourself:
+	//
+	//	errclass.WrapAs(errors.Recover(recover()), errclass.Panic)
 	Panic Class = 900
 )
+
+// Compile-time check that errors.LogValue can describe a classified layer.
+var _ trace.Describer = (*withClassError)(nil)
 
 // Class represents a type of error.
 type Class int
@@ -74,6 +90,11 @@ func GetClass(err error) Class {
 
 func (e *withClassError) Error() string { return e.cause.Error() }
 func (e *withClassError) Unwrap() error { return e.cause }
+
+// DescribeLayer gives errors.LogValue the class.
+func (e *withClassError) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Class: e.class.String()}
+}
 
 // unjoin returns the members of a joined error, or the error itself if it is not
 // a multi-error.

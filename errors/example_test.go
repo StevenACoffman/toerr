@@ -1,7 +1,9 @@
 package errors_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"strings"
 	"testing"
@@ -10,7 +12,10 @@ import (
 	"github.com/StevenACoffman/toerr/errors/sentinel"
 )
 
-var errRateLimited = sentinel.New("rate limited")
+var (
+	errRateLimited  = sentinel.New("rate limited")
+	errUserNotFound = sentinel.New("user not found")
+)
 
 type exampleRateLimitError struct{ error }
 
@@ -21,12 +26,38 @@ func ExampleJoin() {
 	// Output: true
 }
 
+// Wrapf says what was being attempted, in the same breath as fmt.Errorf, and also
+// records where.
+func ExampleWrapf() {
+	err := errors.Wrapf(fs.ErrNotExist, "load config %q", "/etc/app.yaml")
+	fmt.Println(err)
+	fmt.Println(errors.Is(err, fs.ErrNotExist))
+	// Output:
+	// load config "/etc/app.yaml": file does not exist
+	// true
+}
+
 // AsType matches a type attached by Mark, anywhere up the chain.
 func ExampleMark() {
 	err := errors.Mark(errors.New("upstream 429"), &exampleRateLimitError{})
 	_, ok := errors.AsType[*exampleRateLimitError](err)
 	fmt.Println(ok)
 	// Output: true
+}
+
+// Seal turns a dependency's error into a domain sentinel: callers match the mark
+// outside the seal and nothing inside it, while the message keeps the detail.
+func ExampleSeal() {
+	dependency := fmt.Errorf("open users.db: %w", fs.ErrNotExist)
+	err := errors.Mark(errors.Seal(dependency), errUserNotFound)
+
+	fmt.Println(errors.Is(err, errUserNotFound))
+	fmt.Println(errors.Is(err, fs.ErrNotExist))
+	fmt.Println(err)
+	// Output:
+	// true
+	// false
+	// open users.db: file does not exist
 }
 
 // Attrs collects every slog attribute along the chain, outermost first.
@@ -39,6 +70,42 @@ func ExampleAttrs() {
 	// Output:
 	// op=pay
 	// user_id=7
+}
+
+// LogValue keeps each error's attributes in its own layer, so siblings that set the
+// same key do not collide.
+func ExampleLogValue() {
+	err := errors.WrapWithMessage(errors.Join(
+		errors.New("b failed", slog.String("op", "b")),
+		errors.WrapWithMessage(errors.New("d failed", slog.String("op", "d")),
+			"c failed", slog.String("op", "c")),
+	), "a failed", slog.String("op", "a"))
+
+	data, _ := json.Marshal(errors.LogValue(err).Any())
+	type layer struct {
+		Attrs struct {
+			Op string `json:"op"`
+		} `json:"attrs"`
+	}
+	type branch struct {
+		Chain  []layer  `json:"chain"`
+		Errors []branch `json:"errors"`
+	}
+	var tree branch
+	_ = json.Unmarshal(data, &tree)
+
+	fmt.Println(tree.Chain[0].Attrs.Op)
+	for _, sibling := range tree.Errors {
+		var ops []string
+		for _, l := range sibling.Chain {
+			ops = append(ops, l.Attrs.Op)
+		}
+		fmt.Println(strings.Join(ops, " "))
+	}
+	// Output:
+	// a
+	// b
+	// c d
 }
 
 // TestJoinedTraceRendersTree pins the "%+v renders a joined error as a tree"

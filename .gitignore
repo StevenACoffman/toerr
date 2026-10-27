@@ -323,3 +323,5 @@ testdata/rapid/
 mutago-report.html
 mutago-agentic.json
 mutago-gitlab.json
+# bin/mutate.sh runs each package's mutago here.
+.mutate.*/
