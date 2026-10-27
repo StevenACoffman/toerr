@@ -52,10 +52,11 @@ go get github.com/StevenACoffman/toerr/errors/errgrpc
   return nil, errcode.Link(errgrpc.FromError(err), "",
       errors.WrapWithMessage(errors.Seal(err), "get user", errgrpc.Attrs(err)...))
   ```
+
 - `errgrpc.Code(code) codes.Code`: map an `errcode.StatusCode` to a gRPC code.
 
 A gRPC status already in an error's chain is not passed through by `Error`. It
-becomes `Unknown`, unless it was translated with `FromCode` on the way in.
+becomes `Unknown`, unless it was translated with `FromError` on the way in.
 
 An error without a code that wraps `context.Canceled` or `context.DeadlineExceeded`
 becomes `Canceled` or `DeadlineExceeded`, as grpc-go's server answers a handler's

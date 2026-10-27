@@ -201,7 +201,7 @@ func Attrs(err error) []slog.Attr {
 // context.DeadlineExceeded or context.Canceled becomes DeadlineExceeded or Canceled
 // (errcode.ForTransport), as grpc-go's server does for a handler's bare context
 // error with status.FromContextError. Unlike FromContextError, the message is still
-// never err.Error(). Translate client errors with [FromCode] where they enter your
+// never err.Error(). Translate client errors with [FromError] where they enter your
 // code.
 func Error(err error) error {
 	if err == nil {
