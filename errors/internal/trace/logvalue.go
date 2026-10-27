@@ -1,3 +1,11 @@
+// This file renders an error tree as the JSON object errors.LogValue returns. It is
+// written by hand, not with encoding/json, so that each layer keeps its own keys in a
+// fixed order and every value is encoded as slog's JSON handler encodes it.
+//
+// The sections below, in order: the tree's members ("msg", "chain", "errors"); one
+// layer's fields; a layer's attributes, resolved and de-duplicated; values and
+// strings, encoded as slog does; and the object writer that places the commas.
+
 package trace
 
 import (
@@ -79,6 +87,8 @@ func (t JSONTree) String() string {
 	return string(b)
 }
 
+// --- The tree: "chain" for an error and its causes, "errors" for a join's branches.
+
 // writeBranch writes t's "chain" and "errors" members into o.
 func writeBranch(o *object, t tree) {
 	layers := t.chain
@@ -134,6 +144,8 @@ func isEmptyJoin(err error) bool {
 	_, located := frame(err)
 	return !described && !attrs && !located
 }
+
+// --- One layer: what a single error in a chain says about itself.
 
 // writeLayer writes err's layer as a JSON object. cause is the next error in the
 // chain, or nil.
@@ -198,6 +210,8 @@ func ownMessage(msg string, cause error) string {
 	return msg
 }
 
+// --- Attributes: slog's rules for dropping, inlining, and repeating keys.
+
 // collect resolves attrs into the members of one JSON object, by slog's rules: the
 // zero Attr is dropped, a group with an empty key is inlined, and an empty group is
 // dropped. A key that repeats keeps its first position and takes its last value.
@@ -251,6 +265,8 @@ func writeMembers(b *bytes.Buffer, list []member) {
 	}
 	b.WriteByte('}')
 }
+
+// --- Values and strings: the encodings slog's JSON handler uses.
 
 // writeValue writes a resolved value as slog's JSON handler writes it.
 func writeValue(b *bytes.Buffer, v slog.Value) {
@@ -367,6 +383,8 @@ func writeEscapedByte(b *bytes.Buffer, c byte) {
 		b.WriteString(strconv.FormatInt(int64(c)|0x100, 16)[1:])
 	}
 }
+
+// --- The object writer: braces and commas, so callers only name keys.
 
 // key writes the next member's key, after a comma or the object's opening brace.
 func (o *object) key(k string) {
