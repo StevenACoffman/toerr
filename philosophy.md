@@ -564,6 +564,16 @@ to carry, `errcode.New(code, message)` is the coded leaf. Give every coded leaf 
 message. Without one, it renders as its code in words (`not found`), and the user
 sees only the transport's generic text.
 
+A dependency's code needs the same translation as its error. Google's error model
+says a service "should not blindly propagate errors" from the services it depends
+on, and should "adjust the party responsible for the error. For example, a server
+that receives an `INVALID_ARGUMENT` error from another service should propagate an
+`INTERNAL` to its own caller." A downstream `InvalidArgument` says your request to it
+was wrong, and a downstream `PermissionDenied` that your service's grants were;
+your caller can fix neither. `errgrpc.FromError` and `errpgx.FromError` make that
+adjustment, so each returns the code of your operation rather than of the call it
+made.
+
 `WithCode` and `WithCodeOpaque` are deprecated spellings of `Link` and of `Link` over a
 sealed cause. Until their removal in the first release after v0.4.0, they behave as
 they always have, so a nil cause still gives a coded leaf.
@@ -596,13 +606,15 @@ A code tells the caller what to do, not only what happened. That is error domain
 applied to the response: whether a failure is transient or permanent, and whether
 repeating the request is safe, is often worth more to the caller than what went
 wrong. At a boundary, decide whether to retry from `errcode.Status` alone. Each code's
-godoc says whether a retry can help:
+godoc says whether a retry can help, following Google's
+[AIP-194](https://google.aip.dev/194):
 
 - `StatusUnavailable`: retry with backoff, if the operation is idempotent.
-- `StatusResourceExhausted`: retry after backoff.
+- `StatusResourceExhausted`: don't retry automatically. A quota may take hours to
+  refill, and each retry may be billed; background work may retry after a long delay.
 - `StatusAborted`: retry the whole read-modify-write, not the last step.
-- `StatusDeadlineExceeded`: the operation may have completed, so retry only an
-  idempotent one.
+- `StatusDeadlineExceeded`: the operation may have completed, so don't retry it
+  automatically; the application may repeat an idempotent one.
 - Every other code: the same request fails the same way until something else
   changes, such as the input, the system's state, or the code.
 
@@ -659,6 +671,13 @@ for routes that are. HTTP also merges codes whose advice differs: 409 carries bo
 whole transaction can, and 504 carries `StatusDeadlineExceeded`, which only an
 idempotent operation should repeat. Where the difference matters to a proxy, gRPC's
 codes keep it.
+
+Retry at one layer. Each layer that retries multiplies the attempts of every layer
+beneath it: Google's SRE book counts one user action becoming 64 attempts on the
+database when three layers each try four times. A service that already retried a
+downstream call, or that is overloaded, should not answer with a code that tells its
+own caller to retry as well, and AIP-194 retries `StatusAborted` at the level above,
+around the whole transaction, not the request that failed.
 
 ### Three Audiences, Three Views
 
