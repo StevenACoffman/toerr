@@ -537,8 +537,8 @@ func (s *Store) FindUser(ctx context.Context, id int) (*User, error) {
 		return nil, errcode.Link(errcode.StatusNotFound, "user not found", errors.Seal(err))
 	}
 	if err != nil {
-		// Keep the cause matchable: a 500 is not a category callers branch on.
-		return nil, errcode.Link(errcode.StatusInternal, "", err)
+		// No caller branches on this failure, so it needs no code; seal it all the same.
+		return nil, errors.Wrapf(errors.Seal(err), "find user %d", id)
 	}
 	return u, nil
 }
@@ -553,8 +553,12 @@ first, `Link(code, message, errors.Seal(err))`, stops every match at the seal (t
 `%v`-style translation), while operators keep the cause's text, trace, and attributes.
 That seal is what "translate before they escape" means in practice: after it,
 `errors.Is(err, sql.ErrNoRows)` is false, so switching storage engines cannot break a
-caller. Seal when hiding a dependency (the not-found path above); link without a seal
-when the cause is your own (the `StatusInternal` path). `Link` returns nil for a nil
+caller. Seal when hiding a dependency, and link without a seal only when the cause is
+your own. An error no caller branches on, like every other database error here, needs
+a seal and a message but no code: it is a code or nothing, and the edge answers it as a
+generic failure. With pgx, `errpgx.Status` chooses the code for every database error,
+so a connection failure answers `StatusUnavailable` instead of looking like a bug:
+`errcode.Link(errpgx.Status(err), "", errors.Seal(err))`. `Link` returns nil for a nil
 cause, as `errors.Wrap` does. Where the failure starts in your own code, with no cause
 to carry, `errcode.New(code, message)` is the coded leaf. Give every coded leaf a
 message. Without one, it renders as its code in words (`not found`), and the user
@@ -588,8 +592,11 @@ new code is handled. Do the same in your own switches.
 
 ### Deciding Retries at a Boundary
 
-At a boundary, decide whether to retry from `errcode.Status` alone. Each code's godoc
-says whether a retry can help:
+A code tells the caller what to do, not only what happened. That is error domains
+applied to the response: whether a failure is transient or permanent, and whether
+repeating the request is safe, is often worth more to the caller than what went
+wrong. At a boundary, decide whether to retry from `errcode.Status` alone. Each code's
+godoc says whether a retry can help:
 
 - `StatusUnavailable`: retry with backoff, if the operation is idempotent.
 - `StatusResourceExhausted`: retry after backoff.
@@ -626,9 +633,32 @@ retryable cause doesn't make the operation retryable. Judge retryability where t
 error leaves the component. Give it the code that is true of the operation, and seal
 the cause so that nothing beneath the seal answers for it.
 
-Don't let `StatusInternal` become the code for everything unclassified. It says an
-invariant broke, which no retry fixes. When a dependency was down, say
-`StatusUnavailable`, so callers can tell a bug from an outage.
+Don't let `StatusInternal` become the code for everything unclassified. When nobody
+knows which code to use, `StatusInternal` is the one that feels safe, and it becomes
+the `throws Exception` of status codes: it says an invariant broke, which no retry
+fixes, so an outage reported as `StatusInternal` looks like a bug and is never retried.
+That is a matter of discipline, not of the code set. Leave an error you cannot
+classify without a code, say `StatusUnavailable` when a dependency was down, and let
+an adapter such as `errpgx` choose the code for a driver's errors.
+
+The program is not the only reader of a code. Infrastructure between the caller and
+the server acts on it without asking:
+
+- gRPC retries a method only for the codes its service config lists in
+  `retryableStatusCodes`, which in gRPC's own example is just `UNAVAILABLE`. Without a
+  policy it retries only what it knows the server never processed.
+- Envoy, and the meshes built on it, retry gRPC `unavailable`, `resource-exhausted`,
+  `deadline-exceeded`, `cancelled`, or even `internal`, and HTTP `5xx`, 502 to 504, or
+  409, as each route is configured.
+- Retry middleware in clients and load balancers can do the same with whatever codes
+  it was given.
+
+None of them knows whether an operation is idempotent, so turn their retries on only
+for routes that are. HTTP also merges codes whose advice differs: 409 carries both
+`StatusAlreadyExists`, which no retry fixes, and `StatusAborted`, which a retry of the
+whole transaction can, and 504 carries `StatusDeadlineExceeded`, which only an
+idempotent operation should repeat. Where the difference matters to a proxy, gRPC's
+codes keep it.
 
 ### Three Audiences, Three Views
 
