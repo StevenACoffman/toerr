@@ -572,6 +572,8 @@ Each subpackage has its own README:
 ## Prior Art
 
 - [Failure is Your Domain](https://www.gobeyond.dev/failure-is-your-domain/) - Philosophy of Errors
+- [Ow! My Foot!](https://n8z.dev/posts/ow-my-foot) - errors across languages, error
+  domains and blast radius, and the rakes stepped on
 - [braces.dev/errtrace](https://github.com/bracesdev/errtrace) - the Zig style return trace
 - [remko/go-errors](https://github.com/remko/go-errors): the `errcode` model.
 - [AnnotatedError](https://github.com/myrjola/sheerluck/blob/ba6715f2118eba0677889afb58d77f6f3f33f345/internal/errors/annotatederror.go#L24)
