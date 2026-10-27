@@ -502,10 +502,10 @@ worth knowing before you adopt it.
   plus disciplined `fmt.Errorf` wrapping is usually enough. This package earns its
   keep in larger, long-lived services where the debugging cost of thin errors is
   real.
-- An error can be planful state and it doesn't necessarily mean something went wrong. 
-  It carries semantic meaning that may not change until the API changes. If an error has 
+- An error can be planful state and it doesn't necessarily mean something went wrong.
+  It carries semantic meaning that may not change until the API changes. If an error has
   no locus (clear point of origin or structural anchor) then associating a trace makes
-  no sense. If an error is a normal operational result used as a standard 
+  no sense. If an error is a normal operational result used as a standard
   control-flow value or an opaque, lightweight "domain value", use a simple sentinel.
 
 None of this makes the package wrong. It makes the trade-off explicit. If your

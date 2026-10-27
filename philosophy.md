@@ -714,12 +714,12 @@ message is vetted for users.
 Many Go codebases use Ben Johnson's single error struct, filled one way for a leaf
 and another for a wrap. Each shape has a direct spelling here:
 
-| `Error` literal        | toerr spelling                                                |
-| ---------------------- | ------------------------------------------------------------- |
-| `{Code, Message}`      | `errcode.New(code, message)`                                  |
-| `{Op, Err}`            | `errors.WrapWithMessage(err, op)`, or `errors.Wrap(err)`      |
-| `{Code, Op, Err}`      | `errcode.Link(code, "", errors.WrapWithMessage(err, op))`     |
-| `{Code, Message, Err}` | `errcode.Link(code, message, err)`                            |
+| `Error` literal        | toerr spelling                                            |
+| ---------------------- | --------------------------------------------------------- |
+| `{Code, Message}`      | `errcode.New(code, message)`                              |
+| `{Op, Err}`            | `errors.WrapWithMessage(err, op)`, or `errors.Wrap(err)`  |
+| `{Code, Op, Err}`      | `errcode.Link(code, "", errors.WrapWithMessage(err, op))` |
+| `{Code, Message, Err}` | `errcode.Link(code, message, err)`                        |
 
 The `{Op, Err}` row renders `op: cause`, exactly as the struct did, and records a
 frame besides. Which spelling to pick depends on what the `op` said. An `op` that only

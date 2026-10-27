@@ -112,19 +112,19 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 8. Adoption / Rollout Across the skillet Family — the real open lever
+## 8. Adoption / Rollout Across the `skillet` Family — the Real Open Lever
 
 The library is feature-complete at **v0.1.0** (HEAD == tag; the items above are docs
 and enforcement, not core code). Its actual gap is **adoption**: toerr is the intended
 consolidated replacement for the hand-rolled error machinery in the skillet family, but
 uptake is nascent. Current state (2026-08-05 survey):
 
-| Repo | toerr use |
-| --- | --- |
-| **canonizer** | direct `v0.1.0` — the reference adopter |
-| **skillet** | depends on `v0.1.0`, but imports it in **one** file (`ruleset/synthesize`) while still shipping its own `errs` (Ben Johnson `Error`) for `proof` + the kernel |
-| **exegesis** | transitive only (via skillet) |
-| **skillsaw**, **adh** | not adopted (adh re-exports `skillet/errs.Error` as `adh.Error`) |
+| Repo                  | toerr use                                                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **canonizer**         | direct `v0.1.0` — the reference adopter                                                                                                                       |
+| **skillet**           | depends on `v0.1.0`, but imports it in **one** file (`ruleset/synthesize`) while still shipping its own `errs` (Ben Johnson `Error`) for `proof` + the kernel |
+| **exegesis**          | transitive only (via skillet)                                                                                                                                 |
+| **skillsaw**, **adh** | not adopted (adh re-exports `skillet/errs.Error` as `adh.Error`)                                                                                              |
 
 - [x] **Publish a consumer-side `wrapcheck` snippet.** Every repo that adopts toerr must
       whitelist `Wrap`/`WrapWithMessage`/`Mark` in its own `.golangci.yaml` (toerr's own
