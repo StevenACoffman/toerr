@@ -75,7 +75,10 @@ func TestFromSQLState(t *testing.T) {
 		// A code a later PostgreSQL adds to a known class is classified by its class.
 		"new code in a known class": {"40ZZZ", errcode.StatusAborted},
 		"unknown class":             {pgerrcode.InvalidCatalogName, errcode.StatusUnknown},
-		"too short":                 {"4", errcode.StatusUnknown},
+		"one character":             {"4", errcode.StatusUnknown},
+		"a class alone":             {"40", errcode.StatusUnknown},
+		"four characters":           {"4000", errcode.StatusUnknown},
+		"six characters":            {"400010", errcode.StatusUnknown},
 		"empty":                     {"", errcode.StatusUnknown},
 	}
 	for name, tc := range cases {

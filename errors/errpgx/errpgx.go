@@ -59,7 +59,8 @@ func FromError(err error) errcode.StatusCode {
 // FromSQLState returns the domain status code for a PostgreSQL SQLSTATE, or
 // StatusUnknown for one it does not know. A few codes are mapped on their own and the
 // rest by their class, the first two characters, so a code a later PostgreSQL adds to
-// a class is still classified.
+// a class is still classified. A string that is not five characters is not a SQLSTATE,
+// so it is StatusUnknown.
 //
 // The retry guidance of each code is what decides the mapping. A serialization failure
 // or a deadlock is StatusAborted, because retrying the whole transaction can succeed. A
@@ -104,8 +105,6 @@ func Attrs(err error) []slog.Attr {
 }
 
 // fromSpecificState maps the SQLSTATEs whose code differs from their class's.
-//
-
 func fromSpecificState(state string) (errcode.StatusCode, bool) {
 	switch state {
 	case pgerrcode.UniqueViolation:
@@ -131,11 +130,10 @@ func fromSpecificState(state string) (errcode.StatusCode, bool) {
 	return errcode.StatusUnknown, false
 }
 
-// fromClass maps a SQLSTATE by its class.
-//
-
+// fromClass maps a SQLSTATE by its class. A string that is not five characters is not
+// a SQLSTATE, so it has no class.
 func fromClass(state string) errcode.StatusCode {
-	if len(state) < len("00") {
+	if len(state) != len(pgerrcode.SuccessfulCompletion) {
 		return errcode.StatusUnknown
 	}
 	switch state[:2] {
