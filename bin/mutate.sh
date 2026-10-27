@@ -36,8 +36,10 @@ if [ -n "${MUTATE_ORIGINAL:-}" ]; then
 fi
 
 # Each package runs in a directory of its own, where mutago writes its reports; the
-# agentic reports are merged into ./mutago-agentic.json afterwards.
-runs=$(mktemp -d)
+# agentic reports are merged into ./mutago-agentic.json afterwards. The directories are
+# inside the repository because --git-diff-lines runs git diff in mutago's working
+# directory, and the leading dot keeps go's ./... patterns out of them.
+runs=$(mktemp -d "${root}/.mutate.XXXXXX")
 trap 'rm -rf "${runs}"' EXIT
 pids=()
 outs=()

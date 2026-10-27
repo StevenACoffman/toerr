@@ -14,9 +14,11 @@ jobs:
   mutate:
     name: Mutate changed lines
     runs-on: ubuntu-latest
-    # Changed lines only, so a few minutes; this is a ceiling against a mutant that makes
-    # the suite hang, not a performance target.
-    timeout-minutes: 30
+    # Changed lines only, so usually a few minutes, but a pull request that rewrites a
+    # package mutates most of it: internal/trace alone is about 300 mutants, run one at a
+    # time. This is a ceiling against a mutant that makes the suite hang, not a
+    # performance target.
+    timeout-minutes: 60
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
