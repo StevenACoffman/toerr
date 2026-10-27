@@ -97,6 +97,8 @@ codes.
   `Unimplemented`, `Unauthenticated`, `PermissionDenied`) becomes `Internal`.
 - `errgrpc.FromCode(code)`: the raw table, the domain code of the same name, for a
   call that forwarded the caller's input unchanged.
+- `errgrpc.Attrs(err)`: the downstream status's code, `ErrorInfo` reason and domain,
+  and `RetryInfo` delay, for operators.
 - `errgrpc.Code(code)`: the gRPC code for a domain code.
 
 ## errpgx v0.1.0 (Unreleased)

@@ -43,6 +43,15 @@ go get github.com/StevenACoffman/toerr/errors/errgrpc
   remote service wrote it for its own operators.
 - `errgrpc.FromCode(code) errcode.StatusCode`: the raw table, the domain code of the
   same name, for a call that forwarded the caller's input unchanged.
+- `errgrpc.Attrs(err) []slog.Attr`: a `grpc` group of the downstream status's code,
+  and its `ErrorInfo` reason and domain and `RetryInfo` delay, for operators. A
+  sealed status keeps its message in the error's text but not its details. Attach
+  them with the wrap that says what was attempted:
+
+  ```go
+  return nil, errcode.Link(errgrpc.FromError(err), "",
+      errors.WrapWithMessage(errors.Seal(err), "get user", errgrpc.Attrs(err)...))
+  ```
 - `errgrpc.Code(code) codes.Code`: map an `errcode.StatusCode` to a gRPC code.
 
 A gRPC status already in an error's chain is not passed through by `Error`. It

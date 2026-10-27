@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -144,6 +146,44 @@ func FromError(err error) errcode.StatusCode {
 	default:
 		return FromCode(code)
 	}
+}
+
+// Attrs returns the downstream status's fields for operators, as a "grpc" group: its
+// code, and from its details the ErrorInfo reason and domain and the RetryInfo delay,
+// each left out when absent. It returns nil when err holds no gRPC status. Attach them
+// with the wrap that says what was being attempted:
+//
+//	return nil, errcode.Link(errgrpc.FromError(err), "",
+//		errors.WrapWithMessage(errors.Seal(err), "get user", errgrpc.Attrs(err)...))
+//
+// A sealed status keeps its message in the error's text, but not its details, which
+// hold the machine-readable reason a downstream service gave. ErrorInfo's metadata is
+// left out: it is free-form and can carry the downstream service's identifiers.
+func Attrs(err error) []slog.Attr {
+	s, ok := status.FromError(err)
+	if err == nil || !ok {
+		return nil
+	}
+	fields := []any{slog.String("code", s.Code().String())}
+	for _, detail := range s.Details() {
+		switch d := detail.(type) {
+		case *errdetails.ErrorInfo:
+			if d.GetReason() != "" {
+				fields = append(fields, slog.String("reason", d.GetReason()))
+			}
+			if d.GetDomain() != "" {
+				fields = append(fields, slog.String("domain", d.GetDomain()))
+			}
+		case *errdetails.RetryInfo:
+			if d.GetRetryDelay() != nil {
+				fields = append(
+					fields,
+					slog.Duration("retry_delay", d.GetRetryDelay().AsDuration()),
+				)
+			}
+		}
+	}
+	return []slog.Attr{slog.Group("grpc", fields...)}
 }
 
 // Error converts err into a gRPC status error for a handler to return, or nil if

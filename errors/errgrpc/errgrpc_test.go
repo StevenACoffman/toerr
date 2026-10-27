@@ -3,11 +3,15 @@ package errgrpc_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errcode"
@@ -175,5 +179,37 @@ func TestError(t *testing.T) {
 func TestErrorNil(t *testing.T) {
 	if err := errgrpc.Error(nil); err != nil {
 		t.Errorf("Error(nil) = %v, want nil", err)
+	}
+}
+
+func TestAttrs(t *testing.T) {
+	detailed, err := status.New(codes.ResourceExhausted, "quota").WithDetails(
+		&errdetails.ErrorInfo{
+			Reason: "RATE_LIMIT_EXCEEDED", Domain: "users.example.com",
+			Metadata: map[string]string{"account": "acct-7"},
+		},
+		&errdetails.RetryInfo{RetryDelay: durationpb.New(30 * time.Second)},
+	)
+	if err != nil {
+		t.Fatalf("WithDetails: %v", err)
+	}
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"code and details": {
+			toerr.Wrap(detailed.Err()),
+			"[grpc=[code=ResourceExhausted reason=RATE_LIMIT_EXCEEDED domain=users.example.com retry_delay=30s]]",
+		},
+		"no details":   {status.Error(codes.Unavailable, "x"), "[grpc=[code=Unavailable]]"},
+		"not a status": {errors.New("boom"), "[]"},
+		"nil":          {nil, "[]"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := fmt.Sprint(errgrpc.Attrs(tc.err)); got != tc.want {
+				t.Errorf("Attrs = %s, want %s", got, tc.want)
+			}
+		})
 	}
 }
