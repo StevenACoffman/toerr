@@ -21,6 +21,11 @@
 // return its fields to the goroutine that started it, which adds them under its own
 // scope; that shares nothing between goroutines at all.
 //
+// Top-level fields sit beside the log record's own keys, so a field named msg, time,
+// level, source, or error repeats one of them in a JSON line; name it otherwise or
+// give it a scope. An Add after Attrs, from a goroutine that outlived the request, is
+// in no line.
+//
 // The package imports nothing from toerr. The caller adds the error beside the
 // fields, so the collector also works for code that does not use toerr's errors.
 package logctx

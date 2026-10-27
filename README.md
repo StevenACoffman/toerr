@@ -194,16 +194,29 @@ field from any layer, and `logctx.Attrs` returns them all for the request's one 
 line, beside the error when it failed:
 
 ```go
-ctx = logctx.Init(ctx)
-err := next(ctx)
-
-level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
-if err != nil {
-	level, msg = slog.LevelError, err.Error()
-	attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+func serve(ctx context.Context) (err error) {
+	ctx = logctx.Init(ctx)
+	defer func() {
+		recovered := recover()
+		if p := errors.Recover(recovered); p != nil {
+			err = errclass.WrapAs(p, errclass.Panic)
+		}
+		level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+		if err != nil {
+			level, msg = slog.LevelError, err.Error()
+			attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+		}
+		logger.LogAttrs(ctx, level, msg, attrs...)
+		if recovered != nil {
+			panic(recovered) // net/http, or the goroutine's own recover, still sees it
+		}
+	}()
+	return next(ctx)
 }
-logger.LogAttrs(ctx, level, msg, attrs...)
 ```
+
+The line is written in a `defer`, so a handler that panics still gets it, at error
+level with the panic's stack; the panic then carries on as before.
 
 It is safe for the goroutines a request starts. `logctx.Scope` gives each parallel
 branch a namespace of its own, so two branches' `duration` fields render as

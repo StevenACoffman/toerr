@@ -599,6 +599,25 @@ says whether a retry can help:
 - Every other code: the same request fails the same way until something else
   changes, such as the input, the system's state, or the code.
 
+Two codes are not failures of the operation at all, and belong out of the error rate
+and the alerts. `StatusCanceled` means the caller gave up: there is nothing to retry,
+and the line belongs below error level. `StatusDeadlineExceeded` means time ran out:
+count it as a timeout. Google's HTTP mapping for these gRPC codes, which grpc-gateway
+follows, is 499 Client Closed Request and 504 Gateway Timeout. A handler often returns
+its context's error with no code on it, so read the code at a boundary with
+`errcode.ForTransport`, as `errhttp.Error` and `errgrpc.Error` do. It treats an error
+without a code that wraps `context.Canceled` or `context.DeadlineExceeded` as those
+codes, as grpc-go's server does:
+
+```go
+if code, _ := errcode.ForTransport(err); code == errcode.StatusCanceled {
+	level = slog.LevelInfo // the caller left; nothing failed
+}
+```
+
+A seal hides a context error like any other cause, so the boundary sees it only if it
+is outside every seal.
+
 `errclass` and behaviour interfaces such as `Retryable()` answer the same question
 inside a component. They match anywhere in the chain, and that is the hazard at a
 boundary. A database error that answers `Retryable() == true` still answers through a
@@ -734,16 +753,29 @@ where the request starts, add each field where the code learns it, and write one
 line when the request ends, with the error beside the fields if it failed:
 
 ```go
-ctx = logctx.Init(ctx)
-err := next(ctx)
-
-level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
-if err != nil {
-	level, msg = slog.LevelError, err.Error()
-	attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+func serve(ctx context.Context) (err error) {
+	ctx = logctx.Init(ctx)
+	defer func() {
+		recovered := recover()
+		if p := errors.Recover(recovered); p != nil {
+			err = errclass.WrapAs(p, errclass.Panic)
+		}
+		level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+		if err != nil {
+			level, msg = slog.LevelError, err.Error()
+			attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+		}
+		logger.LogAttrs(ctx, level, msg, attrs...)
+		if recovered != nil {
+			panic(recovered) // net/http, or the goroutine's own recover, still sees it
+		}
+	}()
+	return next(ctx)
 }
-logger.LogAttrs(ctx, level, msg, attrs...)
 ```
+
+The line is written in a `defer`, so a handler that panics still gets it, at error
+level with the panic's stack; the panic then carries on as before.
 
 Beneath it, `logctx.Add(ctx, slog.Bool("cache_hit", true))` records a field from
 any layer. The collector is safe for the goroutines a request starts. Give each
@@ -751,6 +783,14 @@ parallel branch its own `logctx.Scope`, so two branches' `duration` fields rende
 `shard_3.duration` and `shard_4.duration` instead of overwriting each other. Without
 `Init`, `Add` does nothing, so a library can record fields and leave the choice of
 whether to collect them to the program.
+
+If the volume of these lines forces sampling, sample the requests that succeeded and
+keep every failure and panic: a failure's line is the one someone will search for.
+
+`logctx` keeps fields open-ended, so any layer can add one. When a stable schema
+matters more, such as for a BigQuery export, where a field must keep one type, a
+typed struct per request (as the `logevent` library uses) fixes each field's type at
+compile time, at the cost of a schema per endpoint.
 
 ## Failure Domains
 

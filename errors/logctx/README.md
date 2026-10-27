@@ -25,23 +25,42 @@ and hands them to the boundary, for the success path and the failure path alike.
 Without `Init`, `Add` and `Scope` do nothing and `Attrs` returns nil. The collector
 is safe for concurrent use, and it depends only on the standard library.
 
+Two things the boundary should know:
+
+- Top-level fields sit beside the log record's own keys. A field named `msg`,
+  `time`, `level`, `source`, or `error` repeats one of them in the JSON line, and a
+  reader keeps only one of the two, so give such a field another name or a scope.
+- `Attrs` returns a copy. An `Add` after it, from a goroutine that outlived the
+  request, is in no line.
+
 ## Example
 
 ```go
-func logRequests(logger *slog.Logger, next func(context.Context) error) func(context.Context) {
-	return func(ctx context.Context) {
+func logRequests(logger *slog.Logger, next func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) (err error) {
 		ctx = logctx.Init(ctx)
-		err := next(ctx)
-
-		level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
-		if err != nil {
-			level, msg = slog.LevelError, err.Error()
-			attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
-		}
-		logger.LogAttrs(ctx, level, msg, attrs...)
+		defer func() {
+			recovered := recover()
+			if p := errors.Recover(recovered); p != nil {
+				err = errclass.WrapAs(p, errclass.Panic)
+			}
+			level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
+			if err != nil {
+				level, msg = slog.LevelError, err.Error()
+				attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
+			}
+			logger.LogAttrs(ctx, level, msg, attrs...)
+			if recovered != nil {
+				panic(recovered)
+			}
+		}()
+		return next(ctx)
 	}
 }
 ```
+
+The line is written in a `defer`, so a request whose handler panics is still logged,
+at error level with the panic's stack, before the panic carries on.
 
 Fields from a goroutine land under the scope the code that started it chose:
 
