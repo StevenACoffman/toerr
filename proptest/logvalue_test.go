@@ -17,15 +17,23 @@ import (
 // opTree is a recipe for an error tree in which every error with an attribute uses the
 // same key, "op", with a value unique to that error.
 type opTree struct {
-	kind     string // "new", "foreign", "wrap", "mark", "seal", "join"
+	kind     string // "new", "foreign", "wrap", "mark", "seal", "join", "batch"
 	op       int    // 0 for no attribute
 	children []opTree
 }
 
+// batchError is a multi-error declared outside the errors package that reports an
+// attribute of its own, as a batch type might.
+type batchError struct {
+	errs  []error
+	attrs []slog.Attr
+}
+
 // TestLogValueKeepsEveryAttributeOnce checks that LogValue writes each error's
 // attribute exactly once and never writes a key twice in one JSON object, however the
-// errors that share the key are arranged: siblings in a join, layers of a chain, or
-// either beneath a seal or a mark.
+// errors that share the key are arranged: siblings in a join, layers of a chain, a
+// multi-error's own attribute beside its branches', or any of them beneath a seal or a
+// mark.
 //
 // A repeated key is the failure LogValue's shape exists to prevent: Cloud Logging and
 // most JSON decoders keep one value of a repeated key and drop the rest silently.
@@ -55,12 +63,15 @@ func genOpTree(depth int, next *int) *rapid.Generator[opTree] {
 	return rapid.Custom(func(t *rapid.T) opTree {
 		kinds := []string{"new", "foreign"}
 		if depth > 0 {
-			kinds = append(kinds, "wrap", "mark", "seal", "join")
+			kinds = append(kinds, "wrap", "mark", "seal", "join", "batch")
 		}
 		n := opTree{kind: rapid.SampledFrom(kinds).Draw(t, "kind")}
 		switch n.kind {
 		case "join":
 			n.children = rapid.SliceOfN(genOpTree(depth-1, next), 1, 3).Draw(t, "children")
+		case "batch":
+			n.children = rapid.SliceOfN(genOpTree(depth-1, next), 1, 3).Draw(t, "children")
+			n.op = drawOp(t, next)
 		case "mark", "seal":
 			n.children = []opTree{genOpTree(depth-1, next).Draw(t, "child")}
 		case "wrap":
@@ -106,10 +117,16 @@ func (n opTree) build() (want []int, err error) {
 		return want, errors.Mark(children[0], stderrors.New("marker"))
 	case "seal":
 		return want, errors.Seal(children[0])
+	case "batch":
+		return want, &batchError{errs: children, attrs: attrs}
 	default: // join
 		return want, errors.Join(children...)
 	}
 }
+
+func (e *batchError) Error() string      { return "batch" }
+func (e *batchError) Unwrap() []error    { return e.errs }
+func (e *batchError) Attrs() []slog.Attr { return e.attrs }
 
 // checkNoRepeatedKey reads one JSON value and reports the first object that repeats a
 // key, which a decoder into a map would hide.
