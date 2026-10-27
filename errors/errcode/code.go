@@ -195,8 +195,8 @@ func WithCodeOpaque(code StatusCode, message string, cause error) error {
 
 // Code returns [Status] and [Message] together.
 func Code(err error) (StatusCode, string) {
-	var wc *withCodeError
-	if !errors.As(err, &wc) {
+	wc, ok := errors.AsType[*withCodeError](err)
+	if !ok {
 		return StatusUnknown, ""
 	}
 	return wc.code, wc.userMessage()
@@ -205,8 +205,8 @@ func Code(err error) (StatusCode, string) {
 // Status returns the outermost status code in err's chain, or StatusUnknown. The
 // outermost wins so that a wrap can reclassify a failure for its own callers.
 func Status(err error) StatusCode {
-	var wc *withCodeError
-	if !errors.As(err, &wc) {
+	wc, ok := errors.AsType[*withCodeError](err)
+	if !ok {
 		return StatusUnknown
 	}
 	return wc.code
@@ -224,8 +224,8 @@ func Status(err error) StatusCode {
 // beneath it visible; an outer message still replaces an inner one. A sealed cause
 // (errors.Seal) hides any message it carried.
 func Message(err error) string {
-	var wc *withCodeError
-	if !errors.As(err, &wc) {
+	wc, ok := errors.AsType[*withCodeError](err)
+	if !ok {
 		return ""
 	}
 	return wc.userMessage()
@@ -303,8 +303,8 @@ func (e *withCodeError) Format(s fmt.State, verb rune) {
 // case, a message on that error, costs no second search.
 func (e *withCodeError) userMessage() string {
 	for e.message == "" {
-		var inner *withCodeError
-		if !errors.As(e.cause, &inner) {
+		inner, ok := errors.AsType[*withCodeError](e.cause)
+		if !ok {
 			return ""
 		}
 		e = inner
