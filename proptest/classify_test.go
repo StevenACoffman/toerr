@@ -112,6 +112,9 @@ func TestHTTPErrorNeverExposesTheCause(t *testing.T) {
 		if want == "" {
 			want = http.StatusText(status)
 		}
+		if want == "" && status == errhttp.StatusClientClosedRequest {
+			want = "Client Closed Request" // 499 is not in net/http's table.
+		}
 		if got != want {
 			t.Fatalf("message %q, want %q (cause was %q)", got, want, secret)
 		}
