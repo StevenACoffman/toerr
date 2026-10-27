@@ -53,21 +53,25 @@ keep the error's text and trace. errpgx builds no error itself, so the frame the
 A code describes the operation to its caller, and each one carries its retry
 guidance, so the mapping follows what a retry would do:
 
-| pgx error or SQLSTATE                                                                                                   | Code                           | Why                                                            |
-| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------- |
-| `context.DeadlineExceeded`, `context.Canceled`                                                                          | `DeadlineExceeded`, `Canceled` | checked first: the seal hides them from `errcode.ForTransport` |
-| `pgx.ErrNoRows`, `sql.ErrNoRows`                                                                                        | `NotFound`                     |                                                                |
-| `23505` unique violation                                                                                                | `AlreadyExists`                |                                                                |
-| `23502` not null, `23514` check, class `22` data exception                                                              | `InvalidArgument`              | the input is wrong whatever the state                          |
-| `23503` foreign key, `23P01` exclusion, rest of class `23`                                                              | `FailedPrecondition`           | another row must change first                                  |
-| `40001` serialization, `40P01` deadlock, `55P03` lock not available, class `40`, `pgx.ErrTxCommitRollback`              | `Aborted`                      | retry the whole transaction                                    |
-| `40003` statement completion unknown                                                                                    | `Unknown`                      | it may have committed: never retry it automatically            |
-| `57014` statement timeout, a timeout after the statement was sent                                                       | `DeadlineExceeded`             | it may have run                                                |
-| class `08`, a failure to connect, shutdowns, idle timeouts, `25006` read-only after a failover                          | `Unavailable`                  | nothing ran: retry with backoff                                |
-| class `53` insufficient resources                                                                                       | `ResourceExhausted`            |                                                                |
-| `XX001` data corrupted, `XX002` index corrupted                                                                         | `DataLoss`                     |                                                                |
-| class `28` credentials, `42` syntax or privilege, `0A`, `25`, `54`, `57`, `XX`, `pgx.ErrTooManyRows`, `pgx.ErrTxClosed` | `Internal`                     | the program's SQL or configuration is wrong                    |
-| anything else                                                                                                           | `Unknown`                      | a code or nothing                                              |
+| pgx error or SQLSTATE                                                                                                        | Code                           | Why                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------- |
+| `context.DeadlineExceeded`, `context.Canceled`                                                                               | `DeadlineExceeded`, `Canceled` | checked first: the seal hides them from `errcode.ForTransport` |
+| `pgx.ErrNoRows`, `sql.ErrNoRows`                                                                                             | `NotFound`                     |                                                                |
+| `23505` unique violation                                                                                                     | `AlreadyExists`                |                                                                |
+| `23502` not null, `23514` check, class `22` data exception                                                                   | `InvalidArgument`              | the input is wrong whatever the state                          |
+| `23503` foreign key, `23P01` exclusion, rest of class `23`                                                                   | `FailedPrecondition`           | another row must change first                                  |
+| `40001` serialization, `40P01` deadlock, `55P03` lock not available, class `40`, `pgx.ErrTxCommitRollback`                   | `Aborted`                      | retry the whole transaction                                    |
+| `40003` statement completion unknown                                                                                         | `Unknown`                      | it may have committed: never retry it automatically            |
+| `57014` statement timeout, a timeout after the statement was sent                                                            | `DeadlineExceeded`             | it may have run                                                |
+| class `08`, a failure to connect, shutdowns, idle timeouts, `25006` read-only after a failover, `53300` too many connections | `Unavailable`                  | nothing ran: retry with backoff                                |
+| rest of class `53`, such as a full disk                                                                                      | `ResourceExhausted`            | do not retry automatically                                     |
+| `XX001` data corrupted, `XX002` index corrupted                                                                              | `DataLoss`                     |                                                                |
+| class `28` credentials, `42` syntax or privilege, `0A`, `25`, `54`, `57`, `XX`, `pgx.ErrTooManyRows`, `pgx.ErrTxClosed`      | `Internal`                     | the program's SQL or configuration is wrong                    |
+| anything else                                                                                                                | `Unknown`                      | a code or nothing                                              |
+
+A constraint or data violation is `InvalidArgument` on the assumption that the
+caller's input reached the database unchecked. When the program's own data was bad,
+the program is the party responsible: link `StatusInternal` at that call site instead.
 
 A wrong database password or a missing grant is `Internal`, not `Unauthenticated` or
 `PermissionDenied`: the repository's caller did not log in to PostgreSQL, and telling

@@ -61,7 +61,7 @@ func TestFromSQLState(t *testing.T) {
 		"idle session timeout":     {pgerrcode.IdleSessionTimeout, errcode.StatusUnavailable},
 		"read-only after failover": {pgerrcode.ReadOnlySQLTransaction, errcode.StatusUnavailable},
 		"connection exception":     {pgerrcode.ConnectionFailure, errcode.StatusUnavailable},
-		"too many connections":     {pgerrcode.TooManyConnections, errcode.StatusResourceExhausted},
+		"too many connections":     {pgerrcode.TooManyConnections, errcode.StatusUnavailable},
 		"disk full":                {pgerrcode.DiskFull, errcode.StatusResourceExhausted},
 		"data corrupted":           {pgerrcode.DataCorrupted, errcode.StatusDataLoss},
 		"index corrupted":          {pgerrcode.IndexCorrupted, errcode.StatusDataLoss},

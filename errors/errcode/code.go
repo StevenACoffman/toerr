@@ -33,7 +33,8 @@ const (
 	// Retrying the same request cannot succeed.
 	StatusInvalidArgument
 	// StatusDeadlineExceeded means time ran out. The operation may still have
-	// completed, so retry only an idempotent one.
+	// completed, so do not retry it automatically; the application may repeat an
+	// idempotent one.
 	StatusDeadlineExceeded
 	// StatusInternal means an invariant broke: a bug, not a condition to retry. It is
 	// not a default: an error nobody classified needs no code, and a dependency that is
@@ -55,8 +56,9 @@ const (
 	// StatusUnavailable means a transient failure, such as a dependency being
 	// down. Retry with backoff, if the operation is idempotent.
 	StatusUnavailable
-	// StatusResourceExhausted means a quota or rate limit ran out. Retry after
-	// backoff.
+	// StatusResourceExhausted means a quota or rate limit ran out. Do not retry it
+	// automatically: a quota may take hours to refill, and each retry may be billed.
+	// Background work may retry after a long delay.
 	StatusResourceExhausted
 	// StatusAborted means a concurrency conflict, such as a failed transaction or
 	// a stale version. Retry the whole read-modify-write, not the last step.

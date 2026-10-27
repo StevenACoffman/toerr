@@ -120,7 +120,10 @@ func fromSpecificState(state string) (errcode.StatusCode, bool) {
 		return errcode.StatusDeadlineExceeded, true
 	case pgerrcode.AdminShutdown, pgerrcode.CrashShutdown, pgerrcode.CannotConnectNow,
 		pgerrcode.IdleSessionTimeout, pgerrcode.IdleInTransactionSessionTimeout,
-		pgerrcode.ReadOnlySQLTransaction:
+		pgerrcode.ReadOnlySQLTransaction,
+		// Connection slots free up in moments, unlike a quota; the rest of class 53,
+		// such as a full disk, does not.
+		pgerrcode.TooManyConnections:
 		return errcode.StatusUnavailable, true
 	case pgerrcode.DataCorrupted, pgerrcode.IndexCorrupted:
 		return errcode.StatusDataLoss, true

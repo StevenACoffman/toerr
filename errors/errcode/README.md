@@ -39,10 +39,11 @@ never exposes the wrapped internal detail that `err.Error()` would.
 - `errcode.Code(err) (StatusCode, string)`: `Status` and `Message` together.
 - Codes: the gRPC canonical set apart from `OK`, such as `StatusInvalidArgument`,
   `StatusNotFound`, `StatusPermissionDenied`, and `StatusInternal`. Each code's
-  godoc says whether a retry can help. `StatusUnavailable` and
-  `StatusResourceExhausted` can be retried after backoff, and `StatusAborted`
-  by repeating the whole read-modify-write. So a boundary can decide a retry from
-  `Status` alone.
+  godoc says whether a retry can help, following Google's
+  [AIP-194](https://google.aip.dev/194). `StatusUnavailable` can be retried with
+  backoff, and `StatusAborted` by repeating the whole read-modify-write.
+  `StatusResourceExhausted` and `StatusDeadlineExceeded` should not be retried
+  automatically. So a boundary can decide a retry from `Status` alone.
 
 ## Choosing a Code
 

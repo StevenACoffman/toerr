@@ -78,6 +78,9 @@ release notes when you tag it.
   (what was being attempted), the return trace (which layers passed it on), and the
   stack trace (how it was created). New sections cover failure domains, errors across
   goroutines, and a code as the default classification.
+- Each code's retry advice follows Google's AIP-194: `StatusResourceExhausted` and
+  `StatusDeadlineExceeded` are not retried automatically, where the godoc had said to
+  retry them after backoff or when idempotent.
 - `errclass.Panic` is documented, along with how to set it on a recovered panic.
 - The README has a `wrapcheck` configuration for projects that adopt toerr.
 
