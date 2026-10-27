@@ -1,9 +1,11 @@
 package errhttp_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
+	toerr "github.com/StevenACoffman/toerr/errors"
 	"github.com/StevenACoffman/toerr/errors/errcode"
 	"github.com/StevenACoffman/toerr/errors/errhttp"
 )
@@ -25,6 +27,9 @@ func TestStatus(t *testing.T) {
 		"aborted":           {errcode.StatusAborted, http.StatusConflict},
 		"out of range":      {errcode.StatusOutOfRange, http.StatusBadRequest},
 		"data loss":         {errcode.StatusDataLoss, http.StatusInternalServerError},
+		// google/rpc/code.proto's HTTP mapping, which grpc-gateway follows.
+		"canceled":          {errcode.StatusCanceled, errhttp.StatusClientClosedRequest},
+		"deadline exceeded": {errcode.StatusDeadlineExceeded, http.StatusGatewayTimeout},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -46,6 +51,36 @@ func TestStatusMessageDefaultsText(t *testing.T) {
 			msg,
 			http.StatusText(http.StatusNotFound),
 		)
+	}
+}
+
+// An error without a code that wraps a context error is not a server failure.
+func TestErrorAnswersAContextError(t *testing.T) {
+	cases := map[string]struct {
+		err        error
+		wantStatus int
+		wantMsg    string
+	}{
+		"canceled": {
+			toerr.Wrapf(context.Canceled, "load seat"),
+			errhttp.StatusClientClosedRequest, "Client Closed Request",
+		},
+		"deadline exceeded": {
+			toerr.Wrapf(context.DeadlineExceeded, "load seat"),
+			http.StatusGatewayTimeout, http.StatusText(http.StatusGatewayTimeout),
+		},
+		"an attached code wins": {
+			errcode.Link(errcode.StatusUnavailable, "", context.Canceled),
+			http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, msg := errhttp.Error(tc.err)
+			if status != tc.wantStatus || msg != tc.wantMsg {
+				t.Errorf("Error = (%d, %q), want (%d, %q)", status, msg, tc.wantStatus, tc.wantMsg)
+			}
+		})
 	}
 }
 

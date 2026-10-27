@@ -40,6 +40,14 @@ release notes when you tag it.
   `Group`, so code that read it with `Value.Group` or matched the group in
   `ReplaceAttr` must read the JSON instead. `errors.Attrs` still returns the flat
   list, and a nil error now gives the zero `Value` rather than a panic.
+- **`errhttp` answers a cancelled request with 499, and a context error without a code
+  with 499 or 504.** `StatusCanceled` mapped to 408 Request Timeout, which means the
+  server stopped waiting for the client to send its request. It now maps to 499
+  Client Closed Request (`errhttp.StatusClientClosedRequest`), the mapping
+  `google/rpc/code.proto` gives and grpc-gateway uses. `errhttp.Error` now reads the
+  code with `errcode.ForTransport`, so an error wrapping `context.Canceled` or
+  `context.DeadlineExceeded` without a code answers 499 or 504 instead of 500. Update
+  dashboards and alerts that counted these as 408 or 500.
 - **`errcode.Message` returns the outermost non-empty message.** A coded wrap without
   a message only reclassifies, so it no longer hides the message beneath it. `Code`
   returns the same message.

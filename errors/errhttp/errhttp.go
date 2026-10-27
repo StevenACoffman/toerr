@@ -6,6 +6,12 @@ import (
 	"github.com/StevenACoffman/toerr/errors/errcode"
 )
 
+// StatusClientClosedRequest is 499 Client Closed Request: the client went away before
+// the server answered. It is not in net/http, because no RFC defines it, but it is the
+// HTTP mapping google/rpc/code.proto gives CANCELLED and the one grpc-gateway uses, so
+// access logs and metrics can tell an abandoned request from a failed one.
+const StatusClientClosedRequest = 499
+
 // Status maps a domain status code to an HTTP status code. Unknown codes map to
 // 500 (no logging — this is a pure mapping).
 //
@@ -15,7 +21,7 @@ func Status(code errcode.StatusCode) int {
 	case errcode.StatusInternal, errcode.StatusUnknown, errcode.StatusDataLoss:
 		return http.StatusInternalServerError
 	case errcode.StatusCanceled:
-		return http.StatusRequestTimeout
+		return StatusClientClosedRequest
 	case errcode.StatusUnimplemented:
 		return http.StatusNotImplemented
 	case errcode.StatusNotFound:
@@ -48,7 +54,7 @@ func Status(code errcode.StatusCode) int {
 func StatusMessage(code errcode.StatusCode, message string) (int, string) {
 	status := Status(code)
 	if message == "" {
-		message = http.StatusText(status)
+		message = statusText(status)
 	}
 	return status, message
 }
@@ -60,7 +66,19 @@ func StatusMessage(code errcode.StatusCode, message string) (int, string) {
 // user-facing message (errcode.Message), falling back to the generic HTTP status
 // text when none is set. It never returns err.Error(), so wrapped internal
 // detail is not exposed to clients.
+//
+// The code is errcode.ForTransport's, so an error without a code that wraps a context
+// error answers 504 or 499 rather than 500: the request ran out of time or the client
+// left, which a server's error rate should not count.
 func Error(err error) (int, string) {
-	code, message := errcode.Code(err)
+	code, message := errcode.ForTransport(err)
 	return StatusMessage(code, message)
+}
+
+// statusText is http.StatusText, with the text for 499, which net/http does not know.
+func statusText(status int) string {
+	if status == StatusClientClosedRequest {
+		return "Client Closed Request"
+	}
+	return http.StatusText(status)
 }

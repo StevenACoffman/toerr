@@ -11,6 +11,12 @@ safe to send to a client. Unknown or unset codes fall back to `500` and the stan
 HTTP status text, and it never returns `err.Error()`, so wrapped internal detail is
 not leaked to callers.
 
+The mapping is the one `google/rpc/code.proto` gives each gRPC code, which
+grpc-gateway also uses. A cancelled request answers `499 Client Closed Request`
+(`errhttp.StatusClientClosedRequest`, since `net/http` has no constant for it), and an
+error without a code that wraps `context.Canceled` or `context.DeadlineExceeded`
+answers `499` or `504`, not `500`: the client left, or time ran out.
+
 ## Usage
 
 - `errhttp.Error(err) (int, string)`: map the code attached to `err` to an HTTP
