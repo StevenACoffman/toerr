@@ -15,6 +15,9 @@ import (
 	errors "github.com/StevenACoffman/toerr/errors"
 )
 
+// panicText is what LogValue writes for a typed-nil *nilDerefError, as slog does.
+const panicText = "!PANIC: runtime error: invalid memory address or nil pointer dereference"
+
 // atPath matches the directory and line of an "at" member, which vary by machine and
 // by edit, leaving the file name.
 var atPath = regexp.MustCompile(`"at":"[^"]*/([^/"]+):\d+"`)
@@ -29,12 +32,17 @@ type rawJSON struct{}
 // error is nil, so its Error method panics.
 type silentMarkerError struct{ error }
 
+// nilDerefError's Error dereferences its receiver, so a typed nil of it panics.
+type nilDerefError struct{ msg string }
+
 // batchError is a multi-error from another package that reports attributes of its own.
 type batchError struct{ errs []error }
 
 func (redacted) LogValue() slog.Value { return slog.StringValue("REDACTED") }
 
 func (rawJSON) MarshalJSON() ([]byte, error) { return []byte(`{"raw":true}`), nil }
+
+func (e *nilDerefError) Error() string { return e.msg }
 
 func (e *batchError) Error() string      { return stderrors.Join(e.errs...).Error() }
 func (e *batchError) Unwrap() []error    { return e.errs }
@@ -57,6 +65,7 @@ func logJSON(t *testing.T, err error) string {
 
 func TestLogValueShape(t *testing.T) {
 	marker := stderrors.New("marker")
+	var typedNil *nilDerefError
 	cases := map[string]struct {
 		err  error
 		want string
@@ -142,6 +151,15 @@ func TestLogValueShape(t *testing.T) {
 			`{"msg":"a\nb","chain":[{"attrs":{"batch":7}}],"errors":[` +
 				`{"chain":[{"msg":"a"}]},{"chain":[{"msg":"b"}]}]}`,
 		},
+		"typed nil": {
+			error(typedNil),
+			`{"msg":"` + panicText + `","chain":[{"msg":"` + panicText + `"}]}`,
+		},
+		"typed nil beneath a wrap keeps the wrap": {
+			errors.Wrap(typedNil, slog.String("op", "a")),
+			`{"msg":"` + panicText + `","chain":[` +
+				`{"at":"logvalue_test.go","attrs":{"op":"a"}},{"msg":"` + panicText + `"}]}`,
+		},
 		"foreign error with attributes": {
 			&sqlFieldError{column: "email"},
 			`{"msg":"bad column email","chain":[` +
@@ -175,6 +193,10 @@ func TestLogValueAttrs(t *testing.T) {
 			},
 			`{"x":1,"db":{"rows":2}}`,
 		},
+		"an error value whose Error panics": {
+			[]slog.Attr{slog.Any("cause", error((*nilDerefError)(nil)))},
+			`{"cause":"` + panicText + `"}`,
+		},
 		"a redacting LogValuer still redacts": {
 			[]slog.Attr{slog.Any("token", redacted("hunter2"))},
 			`{"token":"REDACTED"}`,
@@ -187,6 +209,23 @@ func TestLogValueAttrs(t *testing.T) {
 				tc.want + `}]}`
 			if got != want {
 				t.Errorf("got\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+// %+v survives a typed nil in the chain: the panic text replaces its message, and the
+// frames still print.
+func TestTraceSurvivesATypedNil(t *testing.T) {
+	cases := map[string]error{
+		"wrapped": errors.Wrap((*nilDerefError)(nil)),
+	}
+	for name, err := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := fmt.Sprintf("%+v", err)
+			if !strings.HasPrefix(got, panicText+"\n") ||
+				!strings.Contains(got, "logvalue_test.go:") {
+				t.Errorf("%%+v =\n%s", got)
 			}
 		})
 	}

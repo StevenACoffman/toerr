@@ -85,6 +85,19 @@ func next(err error) (cause error) {
 	return cause //nolint:wrapcheck // the next node of the walk, not an error for a caller.
 }
 
+// ErrorText returns err.Error(), or, if Error panics, "!PANIC: " and the panic value,
+// as slog's handlers write a value whose method panicked; ok is then false. A typed
+// nil whose Error dereferences its receiver is the common case. Rendering an error
+// for an operator must not fail because one error in the tree is broken.
+func ErrorText(err error) (text string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			text, ok = fmt.Sprintf("!PANIC: %v", r), false
+		}
+	}()
+	return err.Error(), true
+}
+
 // frames returns the return trace of a chain, origin-first: one frame for each error
 // that recorded a call site, read through the errtrace marker so that frames recorded
 // by either package appear.
@@ -120,7 +133,8 @@ func writeTree(b *strings.Builder, t tree, path []int) {
 
 func writeTrace(b *strings.Builder, err error, trace []runtime.Frame, path []int) {
 	// The message may have newlines in it, so print each line separately.
-	for i, line := range strings.Split(err.Error(), "\n") {
+	text, _ := ErrorText(err)
+	for i, line := range strings.Split(text, "\n") {
 		if i == 0 {
 			pipes(b, path, "+- ")
 		} else {

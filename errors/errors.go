@@ -285,14 +285,9 @@ func LogValue(err error) slog.Value {
 }
 
 // markerText returns marker's Error text, or its type name if Error panics or returns "".
-func markerText(marker error) (text string) {
-	defer func() {
-		if recover() != nil {
-			text = fmt.Sprintf("%T", marker)
-		}
-	}()
-	if text = marker.Error(); text == "" {
-		text = fmt.Sprintf("%T", marker)
+func markerText(marker error) string {
+	if text, ok := trace.ErrorText(marker); ok && text != "" {
+		return text
 	}
-	return text
+	return fmt.Sprintf("%T", marker)
 }

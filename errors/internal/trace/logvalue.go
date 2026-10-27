@@ -72,7 +72,7 @@ func (t JSONTree) MarshalJSON() ([]byte, error) {
 	var b bytes.Buffer
 	o := object{b: &b}
 	o.key("msg")
-	writeString(&b, t.err.Error())
+	writeString(&b, text(t.err))
 	writeBranch(&o, buildTree(t.err))
 	o.close()
 	return b.Bytes(), nil
@@ -187,9 +187,15 @@ func describe(err, cause error) Layer {
 		l.Attrs = a.Attrs()
 	}
 	if _, multi := err.(interface{ Unwrap() []error }); !multi {
-		l.Msg = ownMessage(err.Error(), cause)
+		l.Msg = ownMessage(text(err), cause)
 	}
 	return l
+}
+
+// text is ErrorText without its ok result.
+func text(err error) string {
+	t, _ := ErrorText(err)
+	return t
 }
 
 // ownMessage returns the part of msg that err adds to its cause: msg with the cause's
@@ -200,7 +206,7 @@ func ownMessage(msg string, cause error) string {
 	if cause == nil {
 		return msg
 	}
-	causeMsg := cause.Error()
+	causeMsg := text(cause)
 	if msg == causeMsg {
 		return ""
 	}
@@ -307,7 +313,7 @@ func writeTime(b *bytes.Buffer, t time.Time) {
 func writeAny(b *bytes.Buffer, x any) {
 	_, marshaler := x.(json.Marshaler)
 	if err, ok := x.(error); ok && !marshaler {
-		writeString(b, err.Error())
+		writeString(b, text(err))
 		return
 	}
 	writeJSON(b, x)
