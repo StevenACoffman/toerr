@@ -4,8 +4,13 @@ module github.com/StevenACoffman/toerr/errors/errpgx
 
 go 1.26.0
 
-// Until toerr v0.3.0 is tagged, build against the working tree. Consumers ignore a replace
-// in a module they depend on, so this line is harmless once that tag exists.
+// This sets the require github.com/StevenACoffman/toerr to
+// the version AFTER last
+// Until that NEXT version of toerr is tagged, this will build against
+// the working tree.
+//
+// Consumers ignore a replace in a module they depend on,
+// so the replace line is harmless once that tag exists.
 replace github.com/StevenACoffman/toerr => ../..
 
 require (

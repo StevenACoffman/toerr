@@ -4,7 +4,8 @@ module github.com/StevenACoffman/toerr/errors/errgrpc
 
 go 1.26.0
 
-// Set the require github.com/StevenACoffman/toerr to the version AFTER last
+// This sets the require github.com/StevenACoffman/toerr to
+// the version AFTER last
 // Until that NEXT version of toerr is tagged, this will build against
 // the working tree.
 //

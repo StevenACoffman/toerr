@@ -11,7 +11,7 @@ set -euo pipefail
 # script. proptest/ is a module too, but it is test-only and never released.
 #
 # Aborts unless ALL of these hold:
-#   - exactly one version argument, starting with "v"
+#   - exactly one version argument, a canonical vMAJOR.MINOR.PATCH[-PRERELEASE]
 #   - the current branch is main
 #   - the working tree is clean (no staged, unstaged, or untracked changes)
 #   - none of the tags already exists
@@ -23,6 +23,11 @@ set -euo pipefail
 #     release notes, both in .goreleaser.yaml
 #   - local main is identical to origin/main (nothing unpushed, not behind,
 #     not diverged)
+#
+# After tagging, it commits and pushes to main a change that makes each module under
+# errors/ require the next toerr version: the next minor, or a pre-release's own
+# final version. Main then builds them against the working tree as that release's
+# code, and the next release's version check passes without an edit.
 ORG="StevenACoffman"
 REPO="toerr"
 ROOT_MODULE="github.com/${ORG}/${REPO}"
@@ -32,8 +37,9 @@ if [ $# -ne 1 ]; then
 fi
 VERSION=$1
 
-if [[ ${VERSION} != v* ]]; then
-    echo "version must start with v (got: ${VERSION})" >&2
+# Go reads only canonical semantic versions as module versions: no leading zeros.
+if [[ ! ${VERSION} =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "version must be vMAJOR.MINOR.PATCH[-PRERELEASE], no leading zeros (got: ${VERSION})" >&2
     exit 1
 fi
 
@@ -150,3 +156,34 @@ for tag in "${tags[@]}"; do
     curl -sS "https://proxy.golang.org/${escaped}/@v/${VERSION}.info"
     echo
 done
+
+# Point each module at the next release, so main builds it against the working
+# tree as that release's code. The tags above keep the released requirement.
+# A pre-release points at its own final version; a release at the next minor.
+if [[ ${VERSION} =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-.*)?$ ]]; then
+    if [ -n "${BASH_REMATCH[4]}" ]; then
+        next="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+    else
+        next="v${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0"
+    fi
+    gomods=()
+    for dir in ${module_dirs[@]+"${module_dirs[@]}"}; do
+        gomods+=("${dir}/go.mod")
+    done
+    if [ ${#gomods[@]} -gt 0 ]; then
+        # The tags are public by now, so a rerun stops at "tag already exists":
+        # say how to finish by hand.
+        trap 'echo "released ${VERSION}, but requiring ${next} on main failed; finish with:" >&2
+              echo "  git checkout -- ${gomods[*]}; then for each module:" >&2
+              echo "  go -C <dir> mod edit -require=${ROOT_MODULE}@${next}" >&2
+              echo "  and commit, then: git pull --rebase && git push origin main" >&2' ERR
+        for dir in "${module_dirs[@]}"; do
+            go -C "${dir}" mod edit -require="${ROOT_MODULE}@${next}"
+        done
+        git commit -S -m "errgrpc, errpgx: require toerr ${next} for the next release" -- "${gomods[@]}"
+        trap 'echo "released ${VERSION} and committed requiring ${next}, but the push failed;" >&2
+              echo "  finish with: git pull --rebase && git push origin main" >&2' ERR
+        git push origin main
+        trap - ERR
+    fi
+fi

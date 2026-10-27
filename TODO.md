@@ -266,6 +266,11 @@ ______________________________________________________________________
       The release is one GitHub release from the root tag, with an SBOM per module;
       `.goreleaser.yaml` ignores the module tags, and the release workflow fails if one
       is missing. Tested in a sandbox clone against a throwaway remote.
+- [x] After tagging, `bin/release.sh` commits and pushes to `main` a change making each
+      module require the next toerr version (the next minor, or a pre-release's final
+      version), so the next release's version check passes without an edit. It also
+      refuses a version that is not canonical semver. Tested in the sandbox: a release,
+      a pre-release, rejected versions, a push rejected mid-release, and a failed edit.
 - [ ] Release v0.3.0 with `./bin/release.sh v0.3.0`, which tags all three modules.
       Both adapters already require toerr v0.3.0. `errpgx` needs that version, for
       `errcode.ForTransport`'s rule for context errors to match its own.
