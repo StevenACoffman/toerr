@@ -107,40 +107,6 @@ func renderLog(emit func(*slog.Logger)) string {
 	return buf.String()
 }
 
-func TestLogValueGroupsMessageAndAttrs(t *testing.T) {
-	err := errors.New("disk full", slog.String("device", "sda1"))
-
-	// The explicit boundary helper returns a group of the message plus chain attrs.
-	v := errors.LogValue(err)
-	equals(t, slog.KindGroup, v.Kind())
-	var gotMsg, gotDevice bool
-	for _, a := range v.Group() {
-		switch a.Key {
-		case "msg":
-			equals(t, "disk full", a.Value.String())
-			gotMsg = true
-		case "device":
-			equals(t, "sda1", a.Value.String())
-			gotDevice = true
-		}
-	}
-	assert(t, gotMsg, "LogValue group should carry the message")
-	assert(t, gotDevice, "LogValue group should carry the attr")
-
-	// Rendered at a boundary, the grouped form carries both.
-	out := renderLog(
-		func(l *slog.Logger) {
-			l.InfoContext(t.Context(), "operation failed", slog.Any("err", errors.LogValue(err)))
-		},
-	)
-	assert(
-		t,
-		strings.Contains(out, "disk full"),
-		"grouped form should carry the message, got: "+out,
-	)
-	assert(t, strings.Contains(out, "sda1"), "grouped form should carry the attr, got: "+out)
-}
-
 // TestErrorDoesNotAutoExpandInSlog pins the deliberate behavior: these errors do not
 // implement slog.LogValuer, so passing one straight to a logger does not expand its
 // attributes — callers use LogValue/Attrs at the boundary instead.

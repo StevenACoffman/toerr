@@ -14,6 +14,7 @@ var (
 	_ fmt.Formatter                    = (*sealed)(nil)
 	_ interface{ Attrs() []slog.Attr } = (*sealed)(nil)
 	_ trace.HiddenCause                = (*sealed)(nil)
+	_ trace.Describer                  = (*sealed)(nil)
 )
 
 // sealed hides cause from matching and keeps it for the operator view.
@@ -55,6 +56,10 @@ func (s *sealed) Format(f fmt.State, verb rune) { formatError(s, f, verb) }
 // Attrs returns every attribute beneath the seal: attributes are operator context,
 // which the seal keeps.
 func (s *sealed) Attrs() []slog.Attr { return Attrs(s.cause) }
+
+// DescribeLayer marks the seal for LogValue, which then describes the cause beneath
+// it layer by layer instead of using Attrs, which flattens the whole subtree.
+func (s *sealed) DescribeLayer(trace.Token) trace.Layer { return trace.Layer{Sealed: true} }
 
 // TraceCause hands the hidden cause to this module's renderer only; see trace.Token.
 func (s *sealed) TraceCause(trace.Token) error { return s.cause }

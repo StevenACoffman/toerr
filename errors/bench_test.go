@@ -1,6 +1,7 @@
 package errors_test
 
 import (
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ var (
 	benchBool  bool
 	benchAttrs []slog.Attr
 	benchStr   string
+	benchBytes []byte
 )
 
 type benchMarkerError struct{}
@@ -143,11 +145,23 @@ func BenchmarkAttrs(b *testing.B) {
 	})
 }
 
+// BenchmarkLogValue measures what a JSON handler pays: LogValue and the MarshalJSON
+// that walks the tree and resolves every frame.
 func BenchmarkLogValue(b *testing.B) {
-	err, _ := deepChain(10)
-	for b.Loop() {
-		benchAttrs = errors.LogValue(err).Group()
-	}
+	b.Run("chain", func(b *testing.B) {
+		err, _ := deepChain(10)
+		for b.Loop() {
+			benchBytes, _ = errors.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+		}
+	})
+	b.Run("join", func(b *testing.B) {
+		left, _ := deepChain(5)
+		right, _ := deepChain(5)
+		err := errors.Wrap(errors.Join(left, right))
+		for b.Loop() {
+			benchBytes, _ = errors.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+		}
+	})
 }
 
 // BenchmarkFormatTrace measures %+v, which resolves every recorded PC to a frame. It runs

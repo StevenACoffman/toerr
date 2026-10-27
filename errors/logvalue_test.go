@@ -1,0 +1,242 @@
+package errors_test
+
+import (
+	"bytes"
+	"encoding/json"
+	stderrors "errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	errors "github.com/StevenACoffman/toerr/errors"
+)
+
+// atPath matches the directory and line of an "at" member, which vary by machine and
+// by edit, leaving the file name.
+var atPath = regexp.MustCompile(`"at":"[^"]*/([^/"]+):\d+"`)
+
+// redacted logs as a fixed string, as a type holding a secret would.
+type redacted string
+
+// rawJSON encodes itself, as a dependency's type might.
+type rawJSON struct{}
+
+func (redacted) LogValue() slog.Value { return slog.StringValue("REDACTED") }
+
+func (rawJSON) MarshalJSON() ([]byte, error) { return []byte(`{"raw":true}`), nil }
+
+// logJSON returns LogValue's JSON for err, with each "at" cut to its file name. It
+// calls MarshalJSON as slog's handlers do; json.Marshal would also escape HTML.
+func logJSON(t *testing.T, err error) string {
+	t.Helper()
+	m, ok := errors.LogValue(err).Any().(json.Marshaler)
+	if !ok {
+		t.Fatalf("LogValue(%v) is not a json.Marshaler", err)
+	}
+	data, marshalErr := m.MarshalJSON()
+	if marshalErr != nil {
+		t.Fatalf("marshal: %v", marshalErr)
+	}
+	return atPath.ReplaceAllString(string(data), `"at":"$1"`)
+}
+
+func TestLogValueShape(t *testing.T) {
+	marker := stderrors.New("marker")
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"leaf": {
+			errors.New("disk full", slog.String("device", "sda1")),
+			`{"msg":"disk full","chain":[` +
+				`{"msg":"disk full","at":"logvalue_test.go","attrs":{"device":"sda1"}}]}`,
+		},
+		"chain, outermost first": {
+			errors.WrapWithMessage(errors.New("d", slog.String("op", "d")), "c",
+				slog.String("op", "c")),
+			`{"msg":"c: d","chain":[` +
+				`{"msg":"c","at":"logvalue_test.go","attrs":{"op":"c"}},` +
+				`{"msg":"d","at":"logvalue_test.go","attrs":{"op":"d"}}]}`,
+		},
+		"siblings each keep their key": {
+			errors.WrapWithMessage(errors.Join(
+				errors.New("b failed", slog.String("op", "b")),
+				errors.WrapWithMessage(errors.New("d failed", slog.String("op", "d")),
+					"c failed", slog.String("op", "c")),
+			), "a failed", slog.String("op", "a")),
+			`{"msg":"a failed: b failed\nc failed: d failed",` +
+				`"chain":[{"msg":"a failed","at":"logvalue_test.go","attrs":{"op":"a"}}],` +
+				`"errors":[` +
+				`{"chain":[{"msg":"b failed","at":"logvalue_test.go","attrs":{"op":"b"}}]},` +
+				`{"chain":[{"msg":"c failed","at":"logvalue_test.go","attrs":{"op":"c"}},` +
+				`{"msg":"d failed","at":"logvalue_test.go","attrs":{"op":"d"}}]}]}`,
+		},
+		"join at the root": {
+			errors.Join(errors.New("b"), errors.New("c")),
+			`{"msg":"b\nc","errors":[` +
+				`{"chain":[{"msg":"b","at":"logvalue_test.go"}]},` +
+				`{"chain":[{"msg":"c","at":"logvalue_test.go"}]}]}`,
+		},
+		"wrap without a message": {
+			errors.Wrap(errors.New("x"), slog.String("op", "a")),
+			`{"msg":"x","chain":[{"at":"logvalue_test.go","attrs":{"op":"a"}},` +
+				`{"msg":"x","at":"logvalue_test.go"}]}`,
+		},
+		"seal shows what it hides": {
+			errors.Wrap(errors.Seal(errors.New("x", slog.String("op", "x")))),
+			`{"msg":"x","chain":[{"at":"logvalue_test.go"},{"sealed":true},` +
+				`{"msg":"x","at":"logvalue_test.go","attrs":{"op":"x"}}]}`,
+		},
+		"sealed join keeps its siblings apart": {
+			errors.Seal(errors.Join(
+				errors.New("b", slog.String("op", "b")),
+				errors.New("c", slog.String("op", "c")),
+			)),
+			`{"msg":"b\nc","chain":[{"sealed":true}],"errors":[` +
+				`{"chain":[{"msg":"b","at":"logvalue_test.go","attrs":{"op":"b"}}]},` +
+				`{"chain":[{"msg":"c","at":"logvalue_test.go","attrs":{"op":"c"}}]}]}`,
+		},
+		"mark": {
+			errors.Mark(errors.New("x"), marker),
+			`{"msg":"x","chain":[{"mark":"marker"},{"msg":"x","at":"logvalue_test.go"}]}`,
+		},
+		"mark on a foreign error": {
+			errors.Mark(stderrors.New("x"), marker),
+			`{"msg":"x","chain":[{"mark":"marker"},{"at":"logvalue_test.go"},{"msg":"x"}]}`,
+		},
+		"foreign wrapper with a prefix": {
+			fmt.Errorf("load config: %w", errors.New("x")),
+			`{"msg":"load config: x","chain":[{"msg":"load config"},` +
+				`{"msg":"x","at":"logvalue_test.go"}]}`,
+		},
+		"foreign wrapper without a prefix keeps its whole text": {
+			fmt.Errorf("%w (retrying)", stderrors.New("x")),
+			`{"msg":"x (retrying)","chain":[{"msg":"x (retrying)"},{"msg":"x"}]}`,
+		},
+		"foreign wrapper that adds nothing": {
+			fmt.Errorf("%w", stderrors.New("x")),
+			`{"msg":"x","chain":[{},{"msg":"x"}]}`,
+		},
+		"foreign error with attributes": {
+			&sqlFieldError{column: "email"},
+			`{"msg":"bad column email","chain":[` +
+				`{"msg":"bad column email","attrs":{"column":"email"}}]}`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := logJSON(t, tc.err); got != tc.want {
+				t.Errorf("got\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+// Attribute values follow slog's rules and its JSON handler's encodings.
+func TestLogValueAttrs(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)
+	cases := map[string]struct {
+		attrs []slog.Attr
+		want  string
+	}{
+		"a repeated key keeps its first position and takes its last value": {
+			[]slog.Attr{slog.String("op", "a"), slog.Int("id", 1), slog.String("op", "b")},
+			`{"op":"b","id":1}`,
+		},
+		"zero attribute and empty group dropped, empty key inlined": {
+			[]slog.Attr{
+				{},
+				slog.Group("empty"), slog.Group("", slog.Int("x", 1)),
+				slog.Group("db", slog.Int("rows", 2)),
+			},
+			`{"x":1,"db":{"rows":2}}`,
+		},
+		"a redacting LogValuer still redacts": {
+			[]slog.Attr{slog.Any("token", redacted("hunter2"))},
+			`{"token":"REDACTED"}`,
+		},
+		"kinds": {
+			[]slog.Attr{
+				slog.Bool("ok", true), slog.Uint64("n", 7), slog.Float64("f", 1.5),
+				slog.Duration("d", 1500*time.Millisecond), slog.Time("t", at),
+				slog.String("html", "<nil> & more"),
+			},
+			`{"ok":true,"n":7,"f":1.5,"d":1500000000,"t":"2026-01-02T03:04:05.000000006Z",` +
+				`"html":"<nil> & more"}`,
+		},
+		"an error value is its text, unless it encodes itself": {
+			[]slog.Attr{slog.Any("cause", stderrors.New("boom")), slog.Any("raw", rawJSON{})},
+			`{"cause":"boom","raw":{"raw":true}}`,
+		},
+		"a slice": {
+			[]slog.Attr{slog.Any("ids", []int{1, 2})},
+			`{"ids":[1,2]}`,
+		},
+		"a value that cannot be encoded": {
+			[]slog.Attr{slog.Float64("f", math.NaN())},
+			`{"f":"!ERROR:encode float64: json: unsupported value: NaN"}`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := logJSON(t, errors.New("x", tc.attrs...))
+			want := `{"msg":"x","chain":[{"msg":"x","at":"logvalue_test.go","attrs":` +
+				tc.want + `}]}`
+			if got != want {
+				t.Errorf("got\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+// "at" is the location %+v prints for the same error, in full.
+func TestLogValueAtMatchesTheTrace(t *testing.T) {
+	err := errors.New("x")
+	frame := regexp.MustCompile(`\t(\S+:\d+)\n`).FindStringSubmatch(fmt.Sprintf("%+v", err))
+	if frame == nil {
+		t.Fatalf("no frame in %+v", err)
+	}
+	data, _ := json.Marshal(errors.LogValue(err).Any())
+	if want := fmt.Sprintf(`"at":%q`, frame[1]); !strings.Contains(string(data), want) {
+		t.Errorf("%s does not contain %s", data, want)
+	}
+}
+
+func TestLogValueNil(t *testing.T) {
+	if v := errors.LogValue(nil); !v.Equal(slog.Value{}) {
+		t.Errorf("LogValue(nil) = %v, want the zero Value", v)
+	}
+}
+
+// Handlers encode the value with MarshalJSON: a JSON handler nests the object, and a
+// text handler writes the same JSON as a string.
+func TestLogValueInHandlers(t *testing.T) {
+	err := errors.New("disk full", slog.String("device", "sda1"))
+	cases := map[string]struct {
+		handler func(*bytes.Buffer) slog.Handler
+		want    string
+	}{
+		"json": {
+			func(b *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(b, nil) },
+			`"error":{"msg":"disk full","chain":[{"msg":"disk full","at":`,
+		},
+		"text": {
+			func(b *bytes.Buffer) slog.Handler { return slog.NewTextHandler(b, nil) },
+			`error="{\"msg\":\"disk full\",\"chain\":[{\"msg\":\"disk full\",\"at\":`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			slog.New(tc.handler(&buf)).
+				ErrorContext(t.Context(), "failed", slog.Any("error", errors.LogValue(err)))
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Errorf("%s does not contain %s", buf.String(), tc.want)
+			}
+		})
+	}
+}

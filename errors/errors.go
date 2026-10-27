@@ -16,10 +16,12 @@ var (
 	_ interface{ TracePC() uintptr } = (*annotatedError)(nil)
 
 	_ interface{ Attrs() []slog.Attr } = (*annotatedError)(nil)
+	_ trace.Describer                  = (*annotatedError)(nil)
 
 	_ error                          = (*marked)(nil)
 	_ fmt.Formatter                  = (*marked)(nil)
 	_ interface{ TracePC() uintptr } = (*marked)(nil)
+	_ trace.Describer                = (*marked)(nil)
 )
 
 // annotatedError is both the leaf (New) and the wrapper (Wrap): a leaf sets msg,
@@ -181,6 +183,11 @@ func (e *annotatedError) Format(s fmt.State, verb rune) { formatError(e, s, verb
 // package-level Attrs collects them along the whole chain.
 func (e *annotatedError) Attrs() []slog.Attr { return e.attrs }
 
+// DescribeLayer gives LogValue this error's own message and attributes.
+func (e *annotatedError) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Msg: e.msg, Attrs: e.attrs}
+}
+
 func (m *marked) Error() string { return m.cause.Error() }
 
 func (m *marked) Unwrap() error { return m.cause }
@@ -191,6 +198,12 @@ func (m *marked) Unwrap() error { return m.cause }
 func (m *marked) TracePC() uintptr { return 0 }
 
 func (m *marked) Format(s fmt.State, verb rune) { formatError(m, s, verb) }
+
+// DescribeLayer gives LogValue the marker. fmt.Sprint survives a marker whose Error
+// method panics, such as a typed marker with a nil embedded error.
+func (m *marked) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Mark: fmt.Sprint(m.marker)}
+}
 
 // Is reports the marker's identity to errors.Is, so a sentinel marker matches.
 func (m *marked) Is(target error) bool { return Is(m.marker, target) }
@@ -226,16 +239,43 @@ func formatError(err error, s fmt.State, verb rune) {
 	}
 }
 
-// LogValue renders err as a slog group of its message plus every attribute in its
-// chain (msg, then Attrs). It is an explicit boundary helper: these errors deliberately
-// do NOT implement slog.LogValuer, so passing an error to a logger does not auto-expand
-// into structured fields at every layer (which invites the stacked-logline anti-pattern).
-// Instead, log the error once, where you handle it, e.g.
+// LogValue renders err for a structured log line, as a JSON object that keeps the
+// shape of its tree. A JSON handler nests it under the attribute's key:
 //
-//	slog.Any("err", errors.LogValue(err))          // the grouped form, or
-//	logger.LogAttrs(ctx, lvl, err.Error(), errors.Attrs(err)...) // the flat form
+//	logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("error", errors.LogValue(err)))
 //
-// It works for any error; a foreign error yields a group with just the message.
+// For errors.Wrap(errors.Join(b, c), …) with c wrapping d, the object is
+//
+//	{"msg": "<err.Error()>",
+//	 "chain": [{"msg": "a failed", "at": "svc.go:40", "attrs": {"op": "a"}}],
+//	 "errors": [
+//	   {"chain": [{"msg": "b failed", "at": "db.go:12", "attrs": {"op": "b"}}]},
+//	   {"chain": [{"msg": "c failed", "at": "cache.go:20", "attrs": {"op": "c"}},
+//	              {"msg": "d failed", "at": "cache.go:31", "attrs": {"op": "d"}}]}]}
+//
+// A chain lists every error from the outside in, down to a join or the root cause; a
+// join's branches each get a tree of their own under "errors". Each layer keeps its
+// own message, its call site, and its own attributes, so no key collides with
+// another error's, however many siblings set it. A layer also carries "code" and
+// "class" from errcode and errclass, "mark" from Mark, and "sealed" from Seal, whose
+// cause it still shows. Empty fields are left out. Within one layer a repeated key
+// keeps its first position and takes its last value.
+//
+// Attribute values are resolved, so a slog.LogValuer that redacts still redacts, and
+// are encoded as slog's JSON handler encodes them. An error from another package is
+// described by its Error, Unwrap, and Attrs methods.
+//
+// The value is neither an error nor a slog.LogValuer, so handlers encode it with its
+// MarshalJSON; a text handler writes the same JSON as a string. A ReplaceAttr function
+// sees it as one value and cannot reach inside it. For the flat list of attributes,
+// use Attrs.
+//
+// These errors deliberately do not implement slog.LogValuer, so passing one to a
+// logger does not expand it at every layer; log it once, where it is handled. A nil
+// err gives the zero Value.
 func LogValue(err error) slog.Value {
-	return slog.GroupValue(append([]slog.Attr{slog.String("msg", err.Error())}, Attrs(err)...)...)
+	if err == nil {
+		return slog.Value{}
+	}
+	return slog.AnyValue(trace.NewTree(err))
 }

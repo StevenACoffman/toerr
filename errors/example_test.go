@@ -1,6 +1,7 @@
 package errors_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -69,6 +70,42 @@ func ExampleAttrs() {
 	// Output:
 	// op=pay
 	// user_id=7
+}
+
+// LogValue keeps each error's attributes in its own layer, so siblings that set the
+// same key do not collide.
+func ExampleLogValue() {
+	err := errors.WrapWithMessage(errors.Join(
+		errors.New("b failed", slog.String("op", "b")),
+		errors.WrapWithMessage(errors.New("d failed", slog.String("op", "d")),
+			"c failed", slog.String("op", "c")),
+	), "a failed", slog.String("op", "a"))
+
+	data, _ := json.Marshal(errors.LogValue(err).Any())
+	type layer struct {
+		Attrs struct {
+			Op string `json:"op"`
+		} `json:"attrs"`
+	}
+	type branch struct {
+		Chain  []layer  `json:"chain"`
+		Errors []branch `json:"errors"`
+	}
+	var tree branch
+	_ = json.Unmarshal(data, &tree)
+
+	fmt.Println(tree.Chain[0].Attrs.Op)
+	for _, sibling := range tree.Errors {
+		var ops []string
+		for _, l := range sibling.Chain {
+			ops = append(ops, l.Attrs.Op)
+		}
+		fmt.Println(strings.Join(ops, " "))
+	}
+	// Output:
+	// a
+	// b
+	// c d
 }
 
 // TestJoinedTraceRendersTree pins the "%+v renders a joined error as a tree"
