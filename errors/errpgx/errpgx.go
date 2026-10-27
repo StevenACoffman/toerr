@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
@@ -70,6 +71,36 @@ func FromSQLState(state string) errcode.StatusCode {
 		return code
 	}
 	return fromClass(state)
+}
+
+// Attrs returns the server error's fields for operators, as a "pg" group: its
+// sqlstate and the schema, table, column, and constraint it names, each left out when
+// empty. It returns nil when err holds no *pgconn.PgError. Attach them with the wrap
+// that says what was being attempted:
+//
+//	return errcode.Link(errpgx.Status(err), "",
+//		errors.WrapWithMessage(errors.Seal(err), "insert user", errpgx.Attrs(err)...))
+//
+// The Detail, Hint, Where, and InternalQuery fields are left out, because they can
+// carry row values, such as the email a unique violation rejected, or whole
+// statements. The server's message is already in the error's text.
+func Attrs(err error) []slog.Attr {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return nil
+	}
+	var fields []any
+	add := func(key, value string) {
+		if value != "" {
+			fields = append(fields, slog.String(key, value))
+		}
+	}
+	add("sqlstate", pgErr.Code)
+	add("schema", pgErr.SchemaName)
+	add("table", pgErr.TableName)
+	add("column", pgErr.ColumnName)
+	add("constraint", pgErr.ConstraintName)
+	return []slog.Attr{slog.Group("pg", fields...)}
 }
 
 // fromSpecificState maps the SQLSTATEs whose code differs from their class's.

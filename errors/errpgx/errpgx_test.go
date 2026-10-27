@@ -3,11 +3,13 @@ package errpgx_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,4 +256,60 @@ func parseConfig(t *testing.T, addr string) *pgconn.Config {
 		t.Fatalf("parse config: %v", err)
 	}
 	return cfg
+}
+
+func TestAttrs(t *testing.T) {
+	full := &pgconn.PgError{
+		Code: pgerrcode.UniqueViolation, SchemaName: "public", TableName: "users",
+		ColumnName: "email", ConstraintName: "users_email_key",
+		Message: "duplicate key value", Detail: "Key (email)=(ada@example.com) already exists.",
+		Hint: "hint", Where: "where", InternalQuery: "select secret",
+	}
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"every field it reports": {
+			fmt.Errorf("insert: %w", full),
+			"[pg=[sqlstate=23505 schema=public table=users column=email constraint=users_email_key]]",
+		},
+		"empty fields left out": {
+			&pgconn.PgError{Code: pgerrcode.SerializationFailure},
+			"[pg=[sqlstate=40001]]",
+		},
+		"not a server error": {pgx.ErrNoRows, "[]"},
+		"nil":                {nil, "[]"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := fmt.Sprint(errpgx.Attrs(tc.err)); got != tc.want {
+				t.Errorf("Attrs = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// The fields reach the log on the layer of the wrap that carries them, and the row
+// values in Detail never do.
+func TestAttrsInLogValue(t *testing.T) {
+	cause := &pgconn.PgError{
+		Code: pgerrcode.UniqueViolation, ConstraintName: "users_email_key",
+		Detail: "Key (email)=(ada@example.com) already exists.",
+	}
+	err := errcode.Link(errpgx.Status(cause), "",
+		toerr.WrapWithMessage(toerr.Seal(cause), "insert user", errpgx.Attrs(cause)...))
+
+	data, _ := toerr.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+	got := string(data)
+	want := `"msg":"insert user","at":`
+	if !strings.Contains(got, want) ||
+		!strings.Contains(
+			got,
+			`"attrs":{"pg":{"sqlstate":"23505","constraint":"users_email_key"}}`,
+		) {
+		t.Errorf("LogValue = %s", got)
+	}
+	if strings.Contains(got, "ada@example.com") {
+		t.Errorf("LogValue leaks the row's values: %s", got)
+	}
 }
