@@ -21,6 +21,6 @@
 // return its fields to the goroutine that started it, which adds them under its own
 // scope; that shares nothing between goroutines at all.
 //
-// The package imports nothing from toerr. The error joins the fields at the call
-// site, so the collector also works for code that does not use toerr's errors.
+// The package imports nothing from toerr. The caller adds the error beside the
+// fields, so the collector also works for code that does not use toerr's errors.
 package logctx

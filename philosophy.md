@@ -206,7 +206,8 @@ For most application errors a code is simpler than a bespoke struct.
 `Mark` adds a match without changing what operators see. `Seal` removes every match
 without changing it either. `errors.Is`, `errors.As`, `AsType`, and `AsBehavior` stop
 at the seal, and so do an `errcode` code or message, an `errclass` class, and any mark
-beneath it. The message, the `%+v` trace, and `errors.Attrs` still show everything.
+beneath it. The message, the `%+v` trace, `errors.Attrs`, and `errors.LogValue` still
+show everything.
 
 Seal a dependency's error where it enters your domain, then attach your own meaning
 outside the seal:
@@ -344,7 +345,9 @@ happened. A stack trace shows how the program reached the creation site, which m
 when the bug is at that site.
 
 `fmt.Errorf` records only the context chain. A bare `Wrap` records only a frame.
-`Wrapf` and `WrapWithMessage` record both.
+`Wrapf` and `WrapWithMessage` record both. `errors.LogValue` writes both records as
+fields of one log line: each layer's `msg` and `attrs` are the context chain, and its
+`at` is the return trace.
 
 Intent has a home at each scope, and it is cheapest to record where it is known:
 
@@ -440,6 +443,8 @@ from single wrapping (`Unwrap() error`), and it shapes how joined errors behave:
   `Persistent`), so one persistent failure makes the whole batch persistent.
 - `%+v` renders a joined error as a tree, drawing each branch under a `+-`
   connector with `|` gutters and the wrapping error's own trace at the bottom.
+  `errors.LogValue` writes the same tree as JSON, each branch under `errors`, so
+  siblings that set the same attribute key keep their own values.
 
 Use `%w` for a causal chain and `errors.Join` for a set of siblings. They
 compose: a joined error may contain wrapped errors, and a wrapped error may wrap
@@ -615,8 +620,8 @@ one:
 - The **end user** sees a safe, human message: `errcode.Message(err)` (or, at an
   HTTP edge, `errhttp.Error`). When it is empty, supply your own generic text:
   `cmp.Or(errcode.Message(err), "something went wrong")`.
-- The **operator** gets the full detail and return trace: `fmt.Sprintf("%+v", err)`
-  in a log.
+- The **operator** gets the full detail and return trace: `errors.LogValue(err)` as
+  a structured log field, or `fmt.Sprintf("%+v", err)` as text.
 
 Keep the code and the message in agreement. `Status` reads the outermost code, and
 `Message` the outermost non-empty message, so a wrap that changes the code without a
@@ -864,8 +869,8 @@ graph TD
     a mark, a behaviour, or `errclass` only when a code cannot say it. Use
     `errors.Join` for independent failures collected together.
 06. Keep structured context in `slog.Attr` values on the error, and request-wide fields
-    in `logctx`, so the message stays clean. Log once per request, with `logctx.Attrs`,
-    `errors.Attrs`, and `LogAttrs`.
+    in `logctx`, so the message stays clean. Log once per request, with `logctx.Attrs`
+    beside `slog.Any("error", errors.LogValue(err))` in one `LogAttrs` call.
 07. Map domain codes to a transport (HTTP status) only at the edge, never inside
     the error type.
 08. `panic` on unrecoverable invariant violations instead of threading checks that
@@ -884,7 +889,7 @@ graph TD
 ## The Packages in This Repository
 
 - `errors` (root): the primary API: `New`, `Wrap`, `Wrapf`, `WrapWithMessage`, `Mark`,
-  `Seal`, `AsType`, `AsBehavior`, `Recover`, `Attrs`, and the re-exported
+  `Seal`, `AsType`, `AsBehavior`, `Recover`, `Attrs`, `LogValue`, and the re-exported
   `Is`/`As`/`Unwrap`/`Join`. Records call sites, carries `slog` attributes, and
   renders a return trace under `%+v`.
 - `sentinel`: cheap, stack-free sentinel values for `errors.Is` matching.

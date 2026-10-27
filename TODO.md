@@ -41,8 +41,9 @@ ______________________________________________________________________
 - [x] Remove `LogValue()` from `annotatedError`/`marked` (and the `_ slog.LogValuer`
       compile assertions) so passing an error to slog no longer auto-expands into a
       structured group at every layer.
-- [x] Expose `errors.LogValue(err) slog.Value` as an explicit boundary helper (the old
-      grouped rendering, now opt-in); `errors.Attrs(err)` remains the flat-merge option.
+- [x] Expose `errors.LogValue(err) slog.Value` as an explicit boundary helper. Since
+      v0.3.0 it writes the error's tree as JSON, one layer per error, so no key repeats;
+      `errors.Attrs(err)` remains the flat-merge option.
 - [x] Add a doc warning (philosophy.md / README) that rich structured error logging is a
       deliberate boundary act via `errors.Attrs` / `errors.LogValue`, not a per-layer habit.
 - Note: this is the *incentive* half of Gap 4. The *enforcement* half — a lint that flags

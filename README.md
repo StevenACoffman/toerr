@@ -285,9 +285,9 @@ if _, ok := errors.AsType[*NotFoundError](err); ok {
 [`Seal`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#Seal) is the
 opposite of `Mark`. `Mark` adds a match; `Seal` removes every match beneath it, so
 `Is`, `As`, `AsType`, `AsBehavior`, `errcode`, and `errclass` all stop at the seal.
-The message, the `%+v` trace, and `Attrs` are unchanged. Seal a dependency's error
-where it enters your domain, then mark or code it outside the seal, so callers
-match your meaning and never the dependency's:
+The message, the `%+v` trace, `Attrs`, and `LogValue` are unchanged. Seal a
+dependency's error where it enters your domain, then mark or code it outside the seal,
+so callers match your meaning and never the dependency's:
 
 ```go
 err = errors.Mark(errors.Seal(err), ErrNotFound) // matches ErrNotFound, not sql.ErrNoRows
@@ -531,15 +531,15 @@ hop with no location, which is what `wrapcheck` should report; wrap it with `Lin
 
 ## Subpackages
 
-| Package    | Purpose                                                                                    |
-| ---------- | ------------------------------------------------------------------------------------------ |
-| `errors`   | Primary API: `New`, `Wrap`, `Wrapf`, `WrapWithMessage`, `Mark`, `Seal`, `AsType`, `Attrs`. |
-| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                                |
-| `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).                   |
-| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                          |
-| `errgrpc`  | gRPC adapter for `errcode`, in both directions. A module of its own.                       |
-| `logctx`   | Request-scoped log fields for the request's one log line, on success and failure.          |
-| `errclass` | Coarse severity classification that folds across joined errors.                            |
+| Package    | Purpose                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| `errors`   | Primary API: `New`, `Wrap`, `Wrapf`, `WrapWithMessage`, `Mark`, `Seal`, `AsType`, `Attrs`, `LogValue`. |
+| `sentinel` | Cheap, stack-free sentinel values for `errors.Is` matching.                                            |
+| `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).                               |
+| `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                                      |
+| `errgrpc`  | gRPC adapter for `errcode`, in both directions. A module of its own.                                   |
+| `logctx`   | Request-scoped log fields for the request's one log line, on success and failure.                      |
+| `errclass` | Coarse severity classification that folds across joined errors.                                        |
 
 Each subpackage has its own README:
 
