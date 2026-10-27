@@ -8,4 +8,8 @@
 // hides an error from matching while operators still see its text, trace, and
 // attributes. Is, As, Unwrap, and Join are re-exported from the standard library
 // unchanged.
+//
+// Like errors.Is, the walks over an error's tree (%+v, Attrs, and LogValue) do not
+// guard against an Unwrap cycle: an error whose chain leads back to itself never
+// finishes rendering.
 package errors

@@ -116,7 +116,8 @@ func AsType[T error](err error) (T, bool) {
 //
 // the method counterpart to this function, as Unwrap, Is, and As are to theirs.
 // The errors this package creates implement it; an error type declared elsewhere
-// can too, surfacing its own fields without being wrapped to copy them.
+// can too, surfacing its own fields without being wrapped to copy them. Like
+// errors.Is, it does not guard against an Unwrap cycle.
 func Attrs(err error) []slog.Attr {
 	var attrs []slog.Attr
 	walkTree(err, func(e error) {
@@ -274,6 +275,11 @@ func formatError(err error, s fmt.State, verb rune) {
 // MarshalJSON; a text handler writes the same JSON as a string. A ReplaceAttr function
 // sees it as one value and cannot reach inside it. For the flat list of attributes,
 // use Attrs.
+//
+// A logger other than slog, or encoding/json, needs the value inside:
+// errors.LogValue(err).Any() is the json.Marshaler. The slog.Value itself has no
+// exported fields, so encoding/json writes it as {}. Like errors.Is, LogValue does
+// not guard against an Unwrap cycle.
 //
 // These errors deliberately do not implement slog.LogValuer, so passing one to a
 // logger does not expand it at every layer; log it once, where it is handled. A nil

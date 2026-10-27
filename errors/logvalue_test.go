@@ -285,6 +285,27 @@ func TestLogValueEncodesValuesAsSlogDoes(t *testing.T) {
 	}
 }
 
+// Outside slog, the value inside LogValue's result is what encodes the tree; the
+// slog.Value itself encodes as an empty object.
+func TestLogValueOutsideSlog(t *testing.T) {
+	err := errors.New("disk full")
+	cases := map[string]struct {
+		value      any
+		wantPrefix string
+	}{
+		"the value inside": {errors.LogValue(err).Any(), `{"msg":"disk full","chain":[`},
+		"the slog.Value":   {errors.LogValue(err), `{}`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			data, marshalErr := json.Marshal(tc.value)
+			if marshalErr != nil || !strings.HasPrefix(string(data), tc.wantPrefix) {
+				t.Errorf("json.Marshal = %s, %v; want prefix %s", data, marshalErr, tc.wantPrefix)
+			}
+		})
+	}
+}
+
 // "at" is the location %+v prints for the same error, in full.
 func TestLogValueAtMatchesTheTrace(t *testing.T) {
 	err := errors.New("x")

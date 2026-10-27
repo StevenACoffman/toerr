@@ -168,6 +168,10 @@ whose hidden cause it still describes. A layer from another package's error, suc
 `*pq.Error`, also names its Go `type`. Attribute values are resolved first, so a
 `slog.LogValuer` that redacts a secret still redacts it.
 
+With a logger other than slog, such as zerolog's `Interface` or a canonical-line
+library's `Add`, pass the value inside: `errors.LogValue(err).Any()` encodes itself as
+JSON, while the `slog.Value` around it encodes as `{}`.
+
 Errors deliberately do **not** implement `slog.LogValuer` themselves, so passing one
 straight to a logger does not expand it at every layer.
 
