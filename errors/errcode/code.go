@@ -69,6 +69,7 @@ var (
 	_ error                          = (*withCodeError)(nil)
 	_ fmt.Formatter                  = (*withCodeError)(nil)
 	_ interface{ TracePC() uintptr } = (*withCodeError)(nil)
+	_ trace.Describer                = (*withCodeError)(nil)
 )
 
 // StatusCode is a transport-neutral error status code.
@@ -229,6 +230,11 @@ func (e *withCodeError) Unwrap() error {
 // TracePC returns the program counter of the call site that attached the code, so
 // a coded error contributes a frame to the return trace like any other hop.
 func (e *withCodeError) TracePC() uintptr { return e.pc }
+
+// DescribeLayer gives errors.LogValue the code and this error's own message.
+func (e *withCodeError) DescribeLayer(trace.Token) trace.Layer {
+	return trace.Layer{Msg: e.message, Code: e.code.String()}
+}
 
 func (e *withCodeError) Error() string {
 	switch {

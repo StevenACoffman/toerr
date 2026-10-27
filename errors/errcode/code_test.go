@@ -1,9 +1,11 @@
 package errcode_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -293,6 +295,35 @@ func TestACodedErrorContributesItsCallSite(t *testing.T) {
 			}
 			if !strings.HasPrefix(got, tc.err.Error()+"\n") {
 				t.Errorf("%%+v does not lead with the message %q:\n%s", tc.err.Error(), got)
+			}
+		})
+	}
+}
+
+// errors.LogValue gives a coded error a layer of its own: the code, and the message
+// the code carries rather than the "cause (message)" text.
+func TestLogValueShowsTheCode(t *testing.T) {
+	at := regexp.MustCompile(`"at":"[^"]*/([^/"]+):\d+"`)
+	cases := map[string]struct {
+		err  error
+		want string
+	}{
+		"coded wrap": {
+			errcode.Link(errcode.StatusNotFound, "user not found", toerr.New("no rows")),
+			`{"msg":"no rows (user not found)","chain":[` +
+				`{"msg":"user not found","code":"not_found","at":"code_test.go"},` +
+				`{"msg":"no rows","at":"code_test.go"}]}`,
+		},
+		"coded leaf without a message": {
+			errcode.New(errcode.StatusNotFound, ""),
+			`{"msg":"not found","chain":[{"code":"not_found","at":"code_test.go"}]}`,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			data, _ := toerr.LogValue(tc.err).Any().(json.Marshaler).MarshalJSON()
+			if got := at.ReplaceAllString(string(data), `"at":"$1"`); got != tc.want {
+				t.Errorf("got\n%s\nwant\n%s", got, tc.want)
 			}
 		})
 	}

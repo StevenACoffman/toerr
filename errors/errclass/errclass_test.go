@@ -1,6 +1,7 @@
 package errclass_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -212,5 +213,17 @@ func TestSealHidesTheClassBeneath(t *testing.T) {
 				t.Errorf("GetClass = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// errors.LogValue gives a classified error a layer that names the class.
+func TestLogValueShowsTheClass(t *testing.T) {
+	err := errclass.WrapAs(errTest, errclass.Transient)
+
+	data, _ := toerr.LogValue(err).Any().(json.Marshaler).MarshalJSON()
+	want := `{"msg":"this is a test error","chain":[{"class":"transient"},` +
+		`{"msg":"this is a test error"}]}`
+	if string(data) != want {
+		t.Errorf("got\n%s\nwant\n%s", data, want)
 	}
 }
