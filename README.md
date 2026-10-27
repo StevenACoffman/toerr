@@ -556,6 +556,7 @@ hop with no location, which is what `wrapcheck` should report; wrap it with `Lin
 | `errcode`  | Transport-neutral status codes (`New`/`Link`/`Code`/`Status`/`Message`).                               |
 | `errhttp`  | HTTP adapter for `errcode`: maps a domain code to an HTTP status.                                      |
 | `errgrpc`  | gRPC adapter for `errcode`, in both directions. A module of its own.                                   |
+| `errpgx`   | PostgreSQL adapter for `errcode`: maps a pgx error or SQLSTATE to a domain code. A module of its own.  |
 | `logctx`   | Request-scoped log fields for the request's one log line, on success and failure.                      |
 | `errclass` | Coarse severity classification that folds across joined errors.                                        |
 
@@ -566,6 +567,8 @@ Each subpackage has its own README:
 - [`errhttp`](errors/errhttp/): map a coded error to an HTTP status and safe message.
 - [`errgrpc`](errors/errgrpc/): map a coded error to a gRPC status, and a client
   call's code back to a domain code.
+- [`errpgx`](errors/errpgx/): map an error from pgx to the domain code that tells
+  its caller what to do.
 - [`logctx`](errors/logctx/): collect a request's log fields and write them once.
 - [`errclass`](errors/errclass/): classify error severity for retry decisions.
 

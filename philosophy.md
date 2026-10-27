@@ -939,6 +939,9 @@ graph TD
   `Error(err)` map a domain code to an HTTP status at the boundary.
 - `errgrpc`: the gRPC adapter for `errcode`, a module of its own: `Error(err)` for a
   handler to return, and `FromCode` for an error a client call returned.
+- `errpgx`: the PostgreSQL adapter for `errcode`, a module of its own: `Status(err)`
+  and `FromSQLState` map an error from pgx to a domain code where it leaves a
+  repository, and `Attrs` keeps the server's fields for operators.
 - `logctx`: a request-scoped collector of log fields (`Init`, `Add`, `Scope`,
   `Attrs`), for the request's one log line on the success and the failure path.
 - `errclass`: coarse severity classification (`Transient`, `Persistent`, `Panic`)

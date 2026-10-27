@@ -93,3 +93,18 @@ codes.
   `Canceled` or `DeadlineExceeded`, as grpc-go's server answers a bare context error.
 - `errgrpc.FromCode(code)`: the domain code for a client call's gRPC code.
 - `errgrpc.Code(code)`: the gRPC code for a domain code.
+
+## errpgx v0.1.0 (Unreleased)
+
+The first release of `github.com/StevenACoffman/toerr/errors/errpgx`, a module of its
+own so that pgx stays out of toerr's dependency graph. Tag it as
+`errors/errpgx/v0.1.0` after toerr v0.3.0 is tagged.
+
+- `errpgx.Status(err)`: the domain code for an error from `github.com/jackc/pgx/v5`,
+  chosen by the retry guidance each code carries. A context error comes first, a
+  failure to connect is `Unavailable`, and the database's own credentials and grants
+  are `Internal`.
+- `errpgx.FromSQLState(state)`: the domain code for a SQLSTATE, by code and then by
+  class, using `github.com/jackc/pgerrcode`.
+- `errpgx.Attrs(err)`: the server error's sqlstate, schema, table, column, and
+  constraint, for operators, without the fields that can carry row values.

@@ -261,3 +261,5 @@ ______________________________________________________________________
       can stay, because consumers ignore it. `bin/release.sh` tags only the root
       module, so either tag the submodule by hand or teach the script a module path.
       `CHANGELOG.md` has the notes for both.
+- [ ] Tag `errors/errpgx/v0.1.0` the same way, after toerr v0.3.0, since it needs
+      `errcode.ForTransport`'s rule for context errors to match its own.

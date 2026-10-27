@@ -12,7 +12,11 @@ on one small set of codes. SQLSTATEs come from
 [pgerrcode](https://github.com/jackc/pgerrcode).
 
 It is a module of its own, like [`errgrpc`](../errgrpc/), so pgx stays out of the
-dependency graph of a program that does not use it.
+dependency graph of a program that does not use it:
+
+```sh
+go get github.com/StevenACoffman/toerr/errors/errpgx
+```
 
 ## Usage
 

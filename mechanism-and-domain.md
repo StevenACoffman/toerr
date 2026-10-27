@@ -23,7 +23,8 @@ knowledge about your domain:
 - collecting a request's log fields on its context (`logctx`);
 - a container that holds a status code, a user message, and a cause (`errcode`);
 - the three role-based views: application code, end user, operator;
-- transport adapters that map a code to a status (`errhttp`, `errgrpc`).
+- transport adapters that map a code to a status (`errhttp`, `errgrpc`), and a
+  dependency adapter that maps a driver's error to a code (`errpgx`).
 
 None of that encodes what *your* failures are. It is plumbing.
 
