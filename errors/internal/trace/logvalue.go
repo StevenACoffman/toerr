@@ -1,10 +1,7 @@
-// This file renders an error tree as the JSON object errors.LogValue returns. It is
-// written by hand, not with encoding/json, so that each layer keeps its own keys in a
-// fixed order and every value is encoded as slog's JSON handler encodes it.
-//
-// The sections below, in order: the tree's members ("msg", "chain", "errors"); one
-// layer's fields; a layer's attributes, resolved and de-duplicated; values and
-// strings, encoded as slog does; and the object writer that places the commas.
+// The sections of this file, in order: the tree's members ("msg", "chain",
+// "errors"); one layer's fields; a layer's attributes, resolved and de-duplicated;
+// values and strings, encoded as slog does; and the object writer that places the
+// commas.
 
 package trace
 
