@@ -6,12 +6,20 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 # This is a Go *library*: there are no binaries to build. This release
-# publishes a reproducible source tarball, an SBOM of the module dependency
+# publishes a reproducible source tarball, an SBOM of each module's dependency
 # graph (generated with syft), a checksum file that covers every artifact — the
-# SBOM included — and a keyless cosign signature over that checksum.
+# SBOMs included — and a keyless cosign signature over that checksum.
 #
-# Local test:  goreleaser release --snapshot --clean   (needs syft on PATH;
-#              signing is skipped in snapshot).
+# One release covers every module in the repository. bin/release.sh tags the root
+# module (vX.Y.Z) and each module under errors/ (errors/<name>/vX.Y.Z) on the same
+# commit, so they share one source tree, and GoReleaser OSS has no per-module
+# releases anyway (that is Pro's monorepo mode). The release is made from the root
+# tag; the module tags exist for the Go toolchain, which resolves
+# github.com/StevenACoffman/toerr/errors/<name>@vX.Y.Z from them.
+#
+# Local test:  goreleaser release --snapshot --clean --skip=sign   (needs syft on
+#              PATH; --snapshot does not skip signing, and without --skip=sign
+#              cosign waits for a browser login).
 # CI:          a release workflow must install syft + cosign and grant
 #              `id-token: write` for keyless signing.
 
@@ -23,6 +31,14 @@ before:
   hooks:
     - go mod tidy
 
+# Release from the root module's tag. A module tag (errors/<name>/vX.Y.Z) points
+# at the same commit, and without this GoReleaser can take it as the current or
+# previous tag: it is not semver, so the release fails or the changelog spans the
+# wrong range. ignore_tags takes a git glob, not a regular expression.
+git:
+  ignore_tags:
+    - "errors/*"
+
 # No binaries: library exposes only importable packages, so skip the build.
 builds:
   - skip: true
@@ -32,23 +48,63 @@ builds:
 gomod:
   proxy: true
 
-# The source tarball is the artifact a library's SBOM is generated from.
+# The source tarball holds every module: it is the tree all the tags point at.
 source:
   enabled: true
   name_template: "{{ .ProjectName }}_{{ .Version }}_source"
 
-# SBOM of the source tree — captures the full Go module dependency graph via
-# syft (goreleaser's default SBOM generator), emitted beside the source tarball.
+# One SBOM per module, each scanning only that module's go.mod and go.sum. The
+# adapters are modules of their own so that gRPC and pgx stay out of toerr's
+# dependency graph; an SBOM of the whole source tree would put them back, along
+# with the property tests' and the CI workflows' dependencies. A new module under
+# errors/ needs an entry here and a `go get` line in the release footer below:
+# bin/release.sh refuses to tag until it has both.
+#
+# GoReleaser runs these from the dist directory, so the paths climb out of it. The
+# source name is the module path, which syft would otherwise take from that path.
+# While a module builds against the working tree through a replace, syft leaves
+# that replaced dependency (toerr itself) out of the module's SBOM.
 sboms:
-  - id: source
-    artifacts: source
+  - id: toerr
+    artifacts: any
+    cmd: syft
+    args:
+      - scan
+      - "file:../go.mod"
+      - "--source-name=github.com/StevenACoffman/{{ .ProjectName }}"
+      - "--source-version={{ .Tag }}"
+      - "--output=spdx-json=$document"
+      - "--quiet"
+    documents: ["{{ .ProjectName }}_{{ .Version }}.sbom.json"]
+  - id: errgrpc
+    artifacts: any
+    cmd: syft
+    args:
+      - scan
+      - "dir:../errors/errgrpc"
+      - "--source-name=github.com/StevenACoffman/{{ .ProjectName }}/errors/errgrpc"
+      - "--source-version={{ .Tag }}"
+      - "--output=spdx-json=$document"
+      - "--quiet"
+    documents: ["{{ .ProjectName }}-errgrpc_{{ .Version }}.sbom.json"]
+  - id: errpgx
+    artifacts: any
+    cmd: syft
+    args:
+      - scan
+      - "dir:../errors/errpgx"
+      - "--source-name=github.com/StevenACoffman/{{ .ProjectName }}/errors/errpgx"
+      - "--source-version={{ .Tag }}"
+      - "--output=spdx-json=$document"
+      - "--quiet"
+    documents: ["{{ .ProjectName }}-errpgx_{{ .Version }}.sbom.json"]
 
-# checksums.txt covers every artifact, the SBOM and source tarball included.
+# checksums.txt covers every artifact, the SBOMs and source tarball included.
 checksum:
   name_template: "checksums.txt"
 
 # Keyless cosign signature over the checksum. Because the checksum covers the
-# SBOM and the source tarball, this one signature makes all of them verifiable.
+# SBOMs and the source tarball, this one signature makes all of them verifiable.
 # Runs only on real releases (skipped by --snapshot); needs cosign + id-token.
 signs:
   - cmd: cosign
@@ -80,14 +136,27 @@ release:
       --certificate-identity 'https://github.com/StevenACoffman/{{ .ProjectName }}/.github/workflows/release.yml@refs/tags/{{ .Tag }}' \
       checksums.txt
 
-    # 2. source tarball + SBOM hash to the now-trusted checksums.
+    # 2. source tarball + SBOMs hash to the now-trusted checksums.
     shasum -a 256 -c checksums.txt
 
     # 3. GitHub build provenance.
     gh attestation verify {{ .ProjectName }}_{{ .Version }}_source.tar.gz --repo StevenACoffman/{{ .ProjectName }}
     ```
 
-    The SBOM is `{{ .ProjectName }}_{{ .Version }}_source.tar.gz.sbom.json` (SPDX-2.3).
+    ## Modules
+
+    This release tags every module in the repository at the same commit:
+
+    ```bash
+    go get github.com/StevenACoffman/{{ .ProjectName }}@{{ .Tag }}
+    go get github.com/StevenACoffman/{{ .ProjectName }}/errors/errgrpc@{{ .Tag }}
+    go get github.com/StevenACoffman/{{ .ProjectName }}/errors/errpgx@{{ .Tag }}
+    ```
+
+    Each module has its own SBOM (SPDX-2.3), so an adapter's dependencies never
+    appear in toerr's: `{{ .ProjectName }}_{{ .Version }}.sbom.json`,
+    `{{ .ProjectName }}-errgrpc_{{ .Version }}.sbom.json`, and
+    `{{ .ProjectName }}-errpgx_{{ .Version }}.sbom.json`.
 
     ---
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

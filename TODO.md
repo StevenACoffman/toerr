@@ -254,12 +254,17 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 11. Release `errgrpc` — Low Effort, After the Next Release
+## 11. Release the Adapter Modules with `toerr` — Low Effort, at the Next Release
 
-- [ ] Tag `errors/errgrpc/v0.1.0` after toerr v0.3.0. The module requires toerr
-      v0.3.0, which it builds against through a `replace` until then; the `replace`
-      can stay, because consumers ignore it. `bin/release.sh` tags only the root
-      module, so either tag the submodule by hand or teach the script a module path.
-      `CHANGELOG.md` has the notes for both.
-- [ ] Tag `errors/errpgx/v0.1.0` the same way, after toerr v0.3.0, since it needs
+- [x] Teach `bin/release.sh` the module paths. Every module under `errors/` with a
+      `go.mod` (today `errgrpc` and `errpgx`) is released at the root module's version
+      from the same commit, tagged `errors/<name>/vX.Y.Z`, so the two `v0.1.0` tags
+      once planned here are not made. The script refuses unless each module requires
+      toerr at the version being released and has an SBOM entry, makes the tags all
+      or none, pushes them in one atomic push, and primes the proxy for each module.
+      The release is one GitHub release from the root tag, with an SBOM per module;
+      `.goreleaser.yaml` ignores the module tags, and the release workflow fails if one
+      is missing. Tested in a sandbox clone against a throwaway remote.
+- [ ] Release v0.3.0 with `./bin/release.sh v0.3.0`, which tags all three modules.
+      Both adapters already require toerr v0.3.0. `errpgx` needs that version, for
       `errcode.ForTransport`'s rule for context errors to match its own.

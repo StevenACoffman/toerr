@@ -1,8 +1,9 @@
 # Changelog
 
 Curated by hand for each release, for people upgrading. The commit log is the
-developer's record; this file is the user's. Paste a release's section into its GitHub
-release notes when you tag it.
+developer's record; this file is the user's. Every module in the repository is released
+at the same version from the same commit, so paste all of a version's sections (toerr's
+and each adapter module's) into its one GitHub release when you tag it.
 
 ## toerr v0.3.0 (Unreleased)
 
@@ -84,12 +85,12 @@ release notes when you tag it.
 - `errclass.Panic` is documented, along with how to set it on a recovered panic.
 - The README has a `wrapcheck` configuration for projects that adopt toerr.
 
-## errgrpc v0.1.0 (Unreleased)
+## errgrpc v0.3.0 (Unreleased)
 
 The first release of `github.com/StevenACoffman/toerr/errors/errgrpc`, a module of its
-own so that gRPC stays out of toerr's dependency graph. Tag it as
-`errors/errgrpc/v0.1.0` after toerr v0.3.0 is tagged, since it needs that version's
-codes.
+own so that gRPC stays out of toerr's dependency graph. It starts at v0.3.0 because it
+is released with toerr at toerr's version (`bin/release.sh` tags it
+`errors/errgrpc/v0.3.0`), and it needs that version's codes.
 
 - `errgrpc.Error(err)`: a gRPC status error carrying the code and user-facing message,
   never `err.Error()`. An error without a code that wraps a context error becomes
@@ -104,11 +105,12 @@ codes.
   and `RetryInfo` delay, for operators.
 - `errgrpc.Code(code)`: the gRPC code for a domain code.
 
-## errpgx v0.1.0 (Unreleased)
+## errpgx v0.3.0 (Unreleased)
 
 The first release of `github.com/StevenACoffman/toerr/errors/errpgx`, a module of its
-own so that pgx stays out of toerr's dependency graph. Tag it as
-`errors/errpgx/v0.1.0` after toerr v0.3.0 is tagged.
+own so that pgx stays out of toerr's dependency graph. It starts at v0.3.0 because it
+is released with toerr at toerr's version (`bin/release.sh` tags it
+`errors/errpgx/v0.3.0`).
 
 - `errpgx.FromError(err)`: the domain code for an error from `github.com/jackc/pgx/v5`,
   chosen by the retry guidance each code carries. A context error comes first, a
