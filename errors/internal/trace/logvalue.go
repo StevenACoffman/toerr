@@ -3,9 +3,7 @@ package trace
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -30,15 +28,16 @@ type Describer interface {
 	DescribeLayer(Token) Layer
 }
 
-// Tree is an error rendered as JSON: the full message, the chain of layers down to a
-// join or a leaf, and one such tree per branch of the join. It is built when it is
-// marshaled. It is deliberately neither an error nor a slog.LogValuer, either of which
-// a handler would turn into something else before it reached MarshalJSON.
-type Tree struct {
+// JSONTree is an error rendered as the JSON object LogValue documents: the full
+// message, the chain of layers down to a join or the root cause, and one such tree per
+// branch of the join. It is built when it is marshaled. It is deliberately neither an
+// error nor a slog.LogValuer, either of which a handler would turn into something else
+// before it reached MarshalJSON.
+type JSONTree struct {
 	err error
 }
 
-// object writes the members of a JSON object, separating them with commas.
+// object writes a JSON object's members, separating them with commas.
 type object struct {
 	b    *bytes.Buffer
 	open bool
@@ -56,96 +55,117 @@ type members struct {
 	index map[string]int
 }
 
-// NewTree returns err's tree.
-func NewTree(err error) Tree { return Tree{err: err} }
+// NewJSONTree returns err's tree. err must not be nil.
+func NewJSONTree(err error) JSONTree { return JSONTree{err: err} }
 
 // MarshalJSON implements json.Marshaler. It never fails: a value that cannot be
 // encoded is written as a string beginning "!ERROR:", as slog's JSON handler does.
-func (t Tree) MarshalJSON() ([]byte, error) {
+func (t JSONTree) MarshalJSON() ([]byte, error) {
 	var b bytes.Buffer
 	o := object{b: &b}
-	o.member("msg", func() { writeString(&b, t.err.Error()) }, true)
-	writeBranch(&o, t.err)
+	o.key("msg")
+	writeString(&b, t.err.Error())
+	writeBranch(&o, buildTree(t.err))
 	o.close()
 	return b.Bytes(), nil
 }
 
 // MarshalText implements encoding.TextMarshaler, so a text handler writes the same JSON.
-func (t Tree) MarshalText() ([]byte, error) { return t.MarshalJSON() }
+func (t JSONTree) MarshalText() ([]byte, error) { return t.MarshalJSON() }
 
-// String returns the JSON.
-func (t Tree) String() string {
+// String returns the JSON, for fmt and for slog.Value.String.
+func (t JSONTree) String() string {
 	b, _ := t.MarshalJSON()
 	return string(b)
 }
 
-// writeBranch writes the "chain" and "errors" members of the tree rooted at err into o.
-func writeBranch(o *object, err error) {
-	var chain []error
-	var branches []error
-	for err != nil {
-		if multi, ok := err.(interface{ Unwrap() []error }); ok {
-			branches = multi.Unwrap()
-			break
-		}
-		chain = append(chain, err)
-		err = next(err)
+// writeBranch writes t's "chain" and "errors" members into o.
+func writeBranch(o *object, t tree) {
+	layers := t.chain
+	if len(t.children) > 0 && isEmptyJoin(layers[len(layers)-1]) {
+		layers = layers[:len(layers)-1] // a plain join adds nothing but its branches.
 	}
-	o.member("chain", func() {
-		o.b.WriteByte('[')
-		for i, e := range chain {
-			if i > 0 {
-				o.b.WriteByte(',')
-			}
-			writeLayer(o.b, e, next(e))
-		}
-		o.b.WriteByte(']')
-	}, len(chain) > 0)
-	o.member("errors", func() {
-		o.b.WriteByte('[')
-		for i, e := range branches {
-			if i > 0 {
-				o.b.WriteByte(',')
-			}
-			branch := object{b: o.b}
-			writeBranch(&branch, e)
-			branch.close()
-		}
-		o.b.WriteByte(']')
-	}, len(branches) > 0)
+	if len(layers) > 0 {
+		o.key("chain")
+		writeChain(o.b, layers, t.chain)
+	}
+	if len(t.children) > 0 {
+		o.key("errors")
+		writeBranches(o.b, t.children)
+	}
 }
 
-// next returns the error beneath err in its chain, following a seal's hidden cause.
-func next(err error) (cause error) {
-	switch x := err.(type) { //nolint:errorlint // deliberate single-node inspection.
-	case interface{ Unwrap() error }:
-		cause = x.Unwrap()
-	case HiddenCause:
-		cause = x.TraceCause(Token{})
+// writeChain writes the layers as a JSON array. chain is the whole chain the layers
+// begin, which gives each layer its cause.
+func writeChain(b *bytes.Buffer, layers, chain []error) {
+	b.WriteByte('[')
+	for i, err := range layers {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		var cause error
+		if i+1 < len(chain) {
+			cause = chain[i+1]
+		}
+		writeLayer(b, err, cause)
 	}
-	return cause //nolint:wrapcheck // the next node of the walk, not an error for a caller.
+	b.WriteByte(']')
 }
 
-// writeLayer writes err's layer as a JSON object.
+// writeBranches writes a join's branches as a JSON array of trees without a message.
+func writeBranches(b *bytes.Buffer, children []tree) {
+	b.WriteByte('[')
+	for i, child := range children {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		o := object{b: b}
+		writeBranch(&o, child)
+		o.close()
+	}
+	b.WriteByte(']')
+}
+
+// isEmptyJoin reports whether a multi-error has nothing of its own to show: no
+// description, no attributes, and no call site, as errors.Join's has none.
+func isEmptyJoin(err error) bool {
+	_, described := err.(Describer)
+	_, attrs := err.(interface{ Attrs() []slog.Attr })
+	_, located := frame(err)
+	return !described && !attrs && !located
+}
+
+// writeLayer writes err's layer as a JSON object. cause is the next error in the
+// chain, or nil.
 func writeLayer(b *bytes.Buffer, err, cause error) {
 	l := describe(err, cause)
 	o := object{b: b}
-	o.member("msg", func() { writeString(b, l.Msg) }, l.Msg != "")
-	o.member("code", func() { writeString(b, l.Code) }, l.Code != "")
-	o.member("class", func() { writeString(b, l.Class) }, l.Class != "")
-	o.member("mark", func() { writeString(b, l.Mark) }, l.Mark != "")
-	o.member("sealed", func() { b.WriteString("true") }, l.Sealed)
-	if at := location(err); at != "" {
-		o.member("at", func() { writeString(b, at) }, true)
+	for _, field := range []struct{ key, value string }{
+		{"msg", l.Msg}, {"code", l.Code}, {"class", l.Class}, {"mark", l.Mark},
+	} {
+		if field.value != "" {
+			o.key(field.key)
+			writeString(b, field.value)
+		}
 	}
-	if members := collect(l.Attrs); len(members) > 0 {
-		o.member("attrs", func() { writeMembers(b, members) }, true)
+	if l.Sealed {
+		o.key("sealed")
+		b.WriteString("true")
+	}
+	if f, ok := frame(err); ok {
+		o.key("at")
+		writeString(b, f.File+":"+strconv.Itoa(f.Line))
+	}
+	if attrs := collect(l.Attrs); len(attrs) > 0 {
+		o.key("attrs")
+		writeMembers(b, attrs)
 	}
 	o.close()
 }
 
 // describe returns err's layer: its own, if it is one of this module's errors, and
-// otherwise one built from its methods.
+// otherwise one built from its methods. A multi-error's text is its branches', so it
+// has no message of its own.
 func describe(err, cause error) Layer {
 	if d, ok := err.(Describer); ok {
 		return d.DescribeLayer(Token{})
@@ -154,13 +174,16 @@ func describe(err, cause error) Layer {
 	if a, ok := err.(interface{ Attrs() []slog.Attr }); ok {
 		l.Attrs = a.Attrs()
 	}
-	l.Msg = ownMessage(err.Error(), cause)
+	if _, multi := err.(interface{ Unwrap() []error }); !multi {
+		l.Msg = ownMessage(err.Error(), cause)
+	}
 	return l
 }
 
 // ownMessage returns the part of msg that err adds to its cause: msg with the cause's
 // text and the ": " before it cut off the end. If msg does not end that way, the
-// whole of msg is err's own.
+// whole of msg is err's own. This is cockroachdb/errors' rule for a wrapper it has no
+// encoder for.
 func ownMessage(msg string, cause error) string {
 	if cause == nil {
 		return msg
@@ -173,19 +196,6 @@ func ownMessage(msg string, cause error) string {
 		return prefix
 	}
 	return msg
-}
-
-// location returns the file:line of err's call site, or "" if it recorded none.
-func location(err error) string {
-	e, ok := err.(interface{ TracePC() uintptr })
-	if !ok || e.TracePC() == 0 {
-		return ""
-	}
-	f, _ := runtime.CallersFrames([]uintptr{e.TracePC()}).Next()
-	if f.File == "" {
-		return ""
-	}
-	return f.File + ":" + strconv.Itoa(f.Line)
 }
 
 // collect resolves attrs into the members of one JSON object, by slog's rules: the
@@ -229,9 +239,9 @@ func (o *members) set(key string, v slog.Value) {
 	o.list = append(o.list, member{key: key, value: v})
 }
 
-func writeMembers(b *bytes.Buffer, members []member) {
+func writeMembers(b *bytes.Buffer, list []member) {
 	b.WriteByte('{')
-	for i, m := range members {
+	for i, m := range list {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -242,7 +252,7 @@ func writeMembers(b *bytes.Buffer, members []member) {
 	b.WriteByte('}')
 }
 
-// writeValue writes a resolved value with the encodings slog's JSON handler uses.
+// writeValue writes a resolved value as slog's JSON handler writes it.
 func writeValue(b *bytes.Buffer, v slog.Value) {
 	switch v.Kind() {
 	case slog.KindString:
@@ -256,14 +266,24 @@ func writeValue(b *bytes.Buffer, v slog.Value) {
 	case slog.KindDuration:
 		b.WriteString(strconv.FormatInt(int64(v.Duration()), 10))
 	case slog.KindTime:
-		writeString(b, v.Time().Format(time.RFC3339Nano))
+		writeTime(b, v.Time())
 	case slog.KindGroup:
 		writeMembers(b, collect(v.Group()))
 	case slog.KindFloat64:
-		writeAny(b, v.Float64())
-	case slog.KindAny, slog.KindLogValuer:
+		writeJSON(b, v.Float64())
+	case slog.KindAny, slog.KindLogValuer: // Resolve leaves no LogValuer; listed for exhaustive.
 		writeAny(b, v.Any())
 	}
+}
+
+// writeTime writes t in RFC 3339 with nanoseconds, or an error for a year RFC 3339
+// cannot hold, as slog's JSON handler does.
+func writeTime(b *bytes.Buffer, t time.Time) {
+	if y := t.Year(); y < 0 || y >= 10000 {
+		writeString(b, "!ERROR:time.Time year outside of range [0,9999]")
+		return
+	}
+	writeString(b, t.Format(time.RFC3339Nano))
 }
 
 // writeAny writes an error without its own JSON encoding as its text, and anything
@@ -274,12 +294,20 @@ func writeAny(b *bytes.Buffer, x any) {
 		writeString(b, err.Error())
 		return
 	}
-	data, err := marshal(x)
-	if err != nil {
+	writeJSON(b, x)
+}
+
+// writeJSON writes x as encoding/json does without HTML escaping, which a log line
+// does not need, or, if x cannot be encoded, the error as slog's JSON handler writes it.
+func writeJSON(b *bytes.Buffer, x any) {
+	var data bytes.Buffer
+	enc := json.NewEncoder(&data)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(x); err != nil {
 		writeString(b, "!ERROR:"+err.Error())
 		return
 	}
-	b.Write(data)
+	b.Write(bytes.TrimSuffix(data.Bytes(), []byte("\n")))
 }
 
 // writeString writes s as a JSON string, escaped as encoding/json escapes it apart
@@ -306,7 +334,7 @@ func writeString(b *bytes.Buffer, s string) {
 			b.WriteString(s[start:i])
 			b.WriteRune(utf8.RuneError)
 			start = i + size
-		case r == '\u2028' || r == '\u2029':
+		case r == ' ' || r == ' ':
 			b.WriteString(s[start:i])
 			b.WriteString(`\u`)
 			b.WriteString(strconv.FormatInt(int64(r), 16))
@@ -340,32 +368,19 @@ func writeEscapedByte(b *bytes.Buffer, c byte) {
 	}
 }
 
-// marshal is json.Marshal without HTML escaping, which a log line does not need.
-func marshal(x any) ([]byte, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(x); err != nil {
-		return nil, fmt.Errorf("encode %T: %w", x, err)
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
-}
-
-func (o *object) member(key string, value func(), present bool) {
-	if !present {
-		return
-	}
+// key writes the next member's key, after a comma or the object's opening brace.
+func (o *object) key(k string) {
 	if o.open {
 		o.b.WriteByte(',')
 	} else {
 		o.b.WriteByte('{')
 		o.open = true
 	}
-	writeString(o.b, key)
+	writeString(o.b, k)
 	o.b.WriteByte(':')
-	value()
 }
 
+// close ends the object, writing {} if it had no members.
 func (o *object) close() {
 	if !o.open {
 		o.b.WriteByte('{')

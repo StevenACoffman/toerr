@@ -19,7 +19,7 @@ func FuzzTreeEscapesAsEncodingJSON(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
-		got, _ := trace.NewTree(stderrors.New(s)).MarshalJSON()
+		got, _ := trace.NewJSONTree(stderrors.New(s)).MarshalJSON()
 
 		type layer struct {
 			Msg string `json:"msg,omitempty"`

@@ -199,10 +199,11 @@ func (m *marked) TracePC() uintptr { return 0 }
 
 func (m *marked) Format(s fmt.State, verb rune) { formatError(m, s, verb) }
 
-// DescribeLayer gives LogValue the marker. fmt.Sprint survives a marker whose Error
-// method panics, such as a typed marker with a nil embedded error.
+// DescribeLayer gives LogValue the marker's text, or its type when the text says
+// nothing: a typed marker such as &RateLimitError{} often embeds a nil error, and its
+// Error method then panics or returns "".
 func (m *marked) DescribeLayer(trace.Token) trace.Layer {
-	return trace.Layer{Mark: fmt.Sprint(m.marker)}
+	return trace.Layer{Mark: markerText(m.marker)}
 }
 
 // Is reports the marker's identity to errors.Is, so a sentinel marker matches.
@@ -247,15 +248,18 @@ func formatError(err error, s fmt.State, verb rune) {
 // For errors.Wrap(errors.Join(b, c), …) with c wrapping d, the object is
 //
 //	{"msg": "<err.Error()>",
-//	 "chain": [{"msg": "a failed", "at": "svc.go:40", "attrs": {"op": "a"}}],
+//	 "chain": [{"msg": "a failed", "at": "/src/svc.go:40", "attrs": {"op": "a"}}],
 //	 "errors": [
-//	   {"chain": [{"msg": "b failed", "at": "db.go:12", "attrs": {"op": "b"}}]},
-//	   {"chain": [{"msg": "c failed", "at": "cache.go:20", "attrs": {"op": "c"}},
-//	              {"msg": "d failed", "at": "cache.go:31", "attrs": {"op": "d"}}]}]}
+//	   {"chain": [{"msg": "b failed", "at": "/src/db.go:12", "attrs": {"op": "b"}}]},
+//	   {"chain": [{"msg": "c failed", "at": "/src/cache.go:20", "attrs": {"op": "c"}},
+//	              {"msg": "d failed", "at": "/src/cache.go:31", "attrs": {"op": "d"}}]}]}
 //
-// A chain lists every error from the outside in, down to a join or the root cause; a
-// join's branches each get a tree of their own under "errors". Each layer keeps its
-// own message, its call site, and its own attributes, so no key collides with
+// A chain lists every error from the outside in, down to a join or the root cause, and
+// each branch of the join gets a tree of its own under "errors". The join is the
+// chain's last layer only when it reports something of its own, such as attributes.
+// The walk is the one %+v takes, so the "at" fields are the return trace.
+//
+// Each layer keeps its own message, call site, and attributes, so no key collides with
 // another error's, however many siblings set it. A layer also carries "code" and
 // "class" from errcode and errclass, "mark" from Mark, and "sealed" from Seal, whose
 // cause it still shows. Empty fields are left out. Within one layer a repeated key
@@ -277,5 +281,18 @@ func LogValue(err error) slog.Value {
 	if err == nil {
 		return slog.Value{}
 	}
-	return slog.AnyValue(trace.NewTree(err))
+	return slog.AnyValue(trace.NewJSONTree(err))
+}
+
+// markerText returns marker's Error text, or its type name if Error panics or returns "".
+func markerText(marker error) (text string) {
+	defer func() {
+		if recover() != nil {
+			text = fmt.Sprintf("%T", marker)
+		}
+	}()
+	if text = marker.Error(); text == "" {
+		text = fmt.Sprintf("%T", marker)
+	}
+	return text
 }

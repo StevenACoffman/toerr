@@ -25,9 +25,20 @@ type redacted string
 // rawJSON encodes itself, as a dependency's type might.
 type rawJSON struct{}
 
+// silentMarkerError is a typed marker as Mark's documentation shows one: its embedded
+// error is nil, so its Error method panics.
+type silentMarkerError struct{ error }
+
+// batchError is a multi-error from another package that reports attributes of its own.
+type batchError struct{ errs []error }
+
 func (redacted) LogValue() slog.Value { return slog.StringValue("REDACTED") }
 
 func (rawJSON) MarshalJSON() ([]byte, error) { return []byte(`{"raw":true}`), nil }
+
+func (e *batchError) Error() string      { return stderrors.Join(e.errs...).Error() }
+func (e *batchError) Unwrap() []error    { return e.errs }
+func (e *batchError) Attrs() []slog.Attr { return []slog.Attr{slog.Int("batch", 7)} }
 
 // logJSON returns LogValue's JSON for err, with each "at" cut to its file name. It
 // calls MarshalJSON as slog's handlers do; json.Marshal would also escape HTML.
@@ -121,6 +132,16 @@ func TestLogValueShape(t *testing.T) {
 			fmt.Errorf("%w", stderrors.New("x")),
 			`{"msg":"x","chain":[{},{"msg":"x"}]}`,
 		},
+		"typed marker that says nothing names its type": {
+			errors.Mark(errors.New("x"), &silentMarkerError{}),
+			`{"msg":"x","chain":[{"mark":"*errors_test.silentMarkerError"},` +
+				`{"msg":"x","at":"logvalue_test.go"}]}`,
+		},
+		"multi-error with attributes of its own": {
+			&batchError{errs: []error{stderrors.New("a"), stderrors.New("b")}},
+			`{"msg":"a\nb","chain":[{"attrs":{"batch":7}}],"errors":[` +
+				`{"chain":[{"msg":"a"}]},{"chain":[{"msg":"b"}]}]}`,
+		},
 		"foreign error with attributes": {
 			&sqlFieldError{column: "email"},
 			`{"msg":"bad column email","chain":[` +
@@ -138,7 +159,6 @@ func TestLogValueShape(t *testing.T) {
 
 // Attribute values follow slog's rules and its JSON handler's encodings.
 func TestLogValueAttrs(t *testing.T) {
-	at := time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)
 	cases := map[string]struct {
 		attrs []slog.Attr
 		want  string
@@ -159,27 +179,6 @@ func TestLogValueAttrs(t *testing.T) {
 			[]slog.Attr{slog.Any("token", redacted("hunter2"))},
 			`{"token":"REDACTED"}`,
 		},
-		"kinds": {
-			[]slog.Attr{
-				slog.Bool("ok", true), slog.Uint64("n", 7), slog.Float64("f", 1.5),
-				slog.Duration("d", 1500*time.Millisecond), slog.Time("t", at),
-				slog.String("html", "<nil> & more"),
-			},
-			`{"ok":true,"n":7,"f":1.5,"d":1500000000,"t":"2026-01-02T03:04:05.000000006Z",` +
-				`"html":"<nil> & more"}`,
-		},
-		"an error value is its text, unless it encodes itself": {
-			[]slog.Attr{slog.Any("cause", stderrors.New("boom")), slog.Any("raw", rawJSON{})},
-			`{"cause":"boom","raw":{"raw":true}}`,
-		},
-		"a slice": {
-			[]slog.Attr{slog.Any("ids", []int{1, 2})},
-			`{"ids":[1,2]}`,
-		},
-		"a value that cannot be encoded": {
-			[]slog.Attr{slog.Float64("f", math.NaN())},
-			`{"f":"!ERROR:encode float64: json: unsupported value: NaN"}`,
-		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -188,6 +187,48 @@ func TestLogValueAttrs(t *testing.T) {
 				tc.want + `}]}`
 			if got != want {
 				t.Errorf("got\n%s\nwant\n%s", got, want)
+			}
+		})
+	}
+}
+
+// LogValue encodes each kind of value as slog's JSON handler does, including the text
+// it writes for a value it cannot encode.
+func TestLogValueEncodesValuesAsSlogDoes(t *testing.T) {
+	cases := map[string]slog.Attr{
+		"bool":              slog.Bool("v", true),
+		"int":               slog.Int64("v", -7),
+		"uint":              slog.Uint64("v", math.MaxUint64),
+		"float":             slog.Float64("v", 1.5),
+		"NaN":               slog.Float64("v", math.NaN()),
+		"duration":          slog.Duration("v", 1500*time.Millisecond),
+		"time":              slog.Time("v", time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)),
+		"time out of range": slog.Time("v", time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC)),
+		"string":            slog.String("v", "<b> & \"quoted\"\n\u2028"),
+		"group":             slog.Group("v", slog.Int("rows", 2)),
+		"slice":             slog.Any("v", []int{1, 2}),
+		"map":               slog.Any("v", map[string]int{"b": 1, "a": 2}),
+		"error":             slog.Any("v", stderrors.New("boom")),
+		"self-encoding":     slog.Any("v", rawJSON{}),
+		"unencodable":       slog.Any("v", make(chan int)),
+	}
+	for name, a := range cases {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				ReplaceAttr: func(groups []string, b slog.Attr) slog.Attr {
+					if len(groups) == 0 && b.Key != "v" {
+						return slog.Attr{}
+					}
+					return b
+				},
+			})).LogAttrs(t.Context(), slog.LevelInfo, "", a)
+			want := strings.TrimSuffix(buf.String(), "\n")
+
+			got := logJSON(t, errors.New("x", a))
+			_, attrs, _ := strings.Cut(got, `"attrs":`)
+			if attrs = strings.TrimSuffix(attrs, "}]}"); attrs != want {
+				t.Errorf("LogValue wrote %s, slog wrote %s", attrs, want)
 			}
 		})
 	}

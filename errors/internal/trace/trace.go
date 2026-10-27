@@ -12,7 +12,6 @@
 package trace
 
 import (
-	stderrors "errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -32,11 +31,12 @@ type HiddenCause interface {
 	TraceCause(Token) error
 }
 
-// tree represents an error and its return trace as a tree. Children are the
-// branches of a multi-error (errors.Join); a single-cause chain has none.
+// tree is an error split at its joins: the chain of errors from err down to a join or
+// the root cause, outermost first, and one tree per branch of that join. Both
+// renderings read it: %+v for its frames, and LogValue for its layers.
 type tree struct {
 	err      error
-	trace    []runtime.Frame // origin-first
+	chain    []error // a join, when there is one, is its last error
 	children []tree
 }
 
@@ -57,59 +57,56 @@ func Format(err error) string {
 	return b.String()
 }
 
-// buildTree builds a trace tree from an error, following the single-cause chain
-// and splitting into children at a multi-error. Mirrors errtrace's
-// implementation.
+// buildTree splits err into its tree, following each error's Unwrap, or a seal's
+// hidden cause, and branching at an Unwrap() []error.
 func buildTree(err error) tree {
-	current := tree{err: err}
-loop:
-	for {
-		if frame, ok, inner := unwrapFrame(err); ok {
-			current.trace = append(current.trace, frame)
-			err = inner
-			continue
-		}
-
-		// Inspect this node's own Unwrap shape (single vs multi) to build the
-		// tree; do not use errors.As, which would traverse the whole chain.
-		switch x := err.(type) { //nolint:errorlint // deliberate single-node inspection.
-		case interface{ Unwrap() error }:
-			err = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			errs := x.Unwrap()
-			current.children = make([]tree, 0, len(errs))
-			for _, e := range errs {
-				current.children = append(current.children, buildTree(e))
+	t := tree{err: err}
+	for err != nil {
+		t.chain = append(t.chain, err)
+		if multi, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range multi.Unwrap() {
+				t.children = append(t.children, buildTree(e))
 			}
-			break loop
-
-		case HiddenCause:
-			err = x.TraceCause(Token{})
-
-		default:
-			break loop
+			break
 		}
+		err = next(err)
 	}
-
-	slices.Reverse(current.trace)
-	return current
+	return t
 }
 
-// unwrapFrame unwraps the outermost trace frame from err, returning the frame,
-// whether one was present, and the inner error. Mirrors errtrace.UnwrapFrame so
-// both packages read each other's frames.
-func unwrapFrame(err error) (frame runtime.Frame, ok bool, inner error) {
+// next returns the error beneath err in its chain, following a seal's hidden cause.
+func next(err error) (cause error) {
+	switch x := err.(type) { //nolint:errorlint // deliberate single-node inspection.
+	case interface{ Unwrap() error }:
+		cause = x.Unwrap()
+	case HiddenCause:
+		cause = x.TraceCause(Token{})
+	}
+	return cause //nolint:wrapcheck // the next node of the walk, not an error for a caller.
+}
+
+// frames returns the return trace of a chain, origin-first: one frame for each error
+// that recorded a call site, read through the errtrace marker so that frames recorded
+// by either package appear.
+func frames(chain []error) []runtime.Frame {
+	var trace []runtime.Frame
+	for _, err := range slices.Backward(chain) {
+		if f, ok := frame(err); ok {
+			trace = append(trace, f)
+		}
+	}
+	return trace
+}
+
+// frame returns the call site err recorded, if it recorded one. Mark records a zero
+// PC, which yields no frame.
+func frame(err error) (runtime.Frame, bool) {
 	e, ok := err.(interface{ TracePC() uintptr })
-	if !ok {
-		return runtime.Frame{}, false, err
+	if !ok || e.TracePC() == 0 {
+		return runtime.Frame{}, false
 	}
-	inner = stderrors.Unwrap(err)
 	f, _ := runtime.CallersFrames([]uintptr{e.TracePC()}).Next()
-	if f == (runtime.Frame{}) {
-		return runtime.Frame{}, false, inner
-	}
-	return f, true, inner
+	return f, f != (runtime.Frame{})
 }
 
 // writeTree writes the tree depth-first: children (deepest branches) first, then
@@ -118,7 +115,7 @@ func writeTree(b *strings.Builder, t tree, path []int) {
 	for i, child := range t.children {
 		writeTree(b, child, append(path, i))
 	}
-	writeTrace(b, t.err, t.trace, path)
+	writeTrace(b, t.err, frames(t.chain), path)
 }
 
 func writeTrace(b *strings.Builder, err error, trace []runtime.Frame, path []int) {
