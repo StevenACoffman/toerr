@@ -89,6 +89,7 @@ own so that gRPC stays out of toerr's dependency graph. Tag it as
 codes.
 
 - `errgrpc.Error(err)`: a gRPC status error carrying the code and user-facing message,
-  never `err.Error()`.
+  never `err.Error()`. An error without a code that wraps a context error becomes
+  `Canceled` or `DeadlineExceeded`, as grpc-go's server answers a bare context error.
 - `errgrpc.FromCode(code)`: the domain code for a client call's gRPC code.
 - `errgrpc.Code(code)`: the gRPC code for a domain code.

@@ -120,13 +120,17 @@ func FromCode(code codes.Code) errcode.StatusCode {
 //
 // A gRPC status already in err's chain, such as one a downstream call returned, is
 // not passed through: its message was written for another service's operators. An
-// error without an errcode status becomes Unknown. Translate client errors with
-// [FromCode] where they enter your code.
+// error without an errcode status becomes Unknown, except that one wrapping
+// context.DeadlineExceeded or context.Canceled becomes DeadlineExceeded or Canceled
+// (errcode.ForTransport), as grpc-go's server does for a handler's bare context
+// error with status.FromContextError. Unlike FromContextError, the message is still
+// never err.Error(). Translate client errors with [FromCode] where they enter your
+// code.
 func Error(err error) error {
 	if err == nil {
 		return nil
 	}
-	domain, message := errcode.Code(err)
+	domain, message := errcode.ForTransport(err)
 	code := Code(domain)
 	// Returned unwrapped on purpose: gRPC replaces the message of a wrapped status
 	// with the wrapper's Error(), which is the very detail this function withholds.

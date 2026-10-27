@@ -40,6 +40,12 @@ go get github.com/StevenACoffman/toerr/errors/errgrpc
 A gRPC status already in an error's chain is not passed through by `Error`. It
 becomes `Unknown`, unless it was translated with `FromCode` on the way in.
 
+An error without a code that wraps `context.Canceled` or `context.DeadlineExceeded`
+becomes `Canceled` or `DeadlineExceeded`, as grpc-go's server answers a handler's
+bare context error with `status.FromContextError`. Its message is the code's name,
+never `err.Error()`. An attached code wins, and a sealed context error stays
+`Unknown`.
+
 ## Example
 
 ```go

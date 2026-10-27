@@ -1,6 +1,7 @@
 package errgrpc_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -73,6 +74,22 @@ func TestError(t *testing.T) {
 			codes.Unavailable, "Unavailable",
 		},
 		"uncoded error": {toerr.Wrap(secret), codes.Unknown, "Unknown"},
+		// As grpc-go's server answers a handler's bare context error, without its text.
+		"context canceled": {
+			toerr.Wrapf(context.Canceled, "load seat from %s", "pq:users"),
+			codes.Canceled, "Canceled",
+		},
+		"context deadline exceeded": {
+			toerr.Wrapf(context.DeadlineExceeded, "load seat from %s", "pq:users"),
+			codes.DeadlineExceeded, "DeadlineExceeded",
+		},
+		"an attached code wins over the context error": {
+			errcode.Link(errcode.StatusUnavailable, "", context.Canceled),
+			codes.Unavailable, "Unavailable",
+		},
+		"a sealed context error stays hidden": {
+			toerr.Wrap(toerr.Seal(context.Canceled)), codes.Unknown, "Unknown",
+		},
 		// A downstream status is another service's operator view, not ours to forward.
 		"downstream status passed through": {
 			toerr.Wrap(downstream), codes.Unknown, "Unknown",
