@@ -38,10 +38,12 @@ jobs:
       # annotates surviving mutants on the diff instead, which is the part worth reading —
       # each one is a line the suite runs without checking. Add a floor once the escape set
       # has been looked at.
+      #
+      # bin/mutate.sh runs each mutant against every package and the properties, with
+      # -race, rather than only the mutated package's own tests.
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
-        mutago --git-diff-lines \
+        bin/mutate.sh --git-diff-lines \
           --git-diff-base="${BASE_SHA}" \
-          --logger-github --quiet --no-diffs \
-          ./errors/...
+          --logger-github --quiet --no-diffs

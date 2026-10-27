@@ -76,15 +76,17 @@ description = "Lint the property-test module"
 dir = "proptest"
 run = "golangci-lint run ./..."
 
+# bin/mutate.sh runs each mutant against every package and the properties, not only
+# the mutated package's own tests; see its header for why.
 [tasks.mutate]
 description = "Mutate the library packages under errors/"
-run = "mutago --coverage --quiet ./errors/..."
+run = "bin/mutate.sh --quiet --no-diffs"
 
 [tasks."mutate:diff"]
 description = "Mutate only the lines this branch changed (usage: mise run mutate:diff [base])"
 usage = 'arg "[base]" default="origin/main" help="git revision to diff against"'
-run = "mutago --git-diff-lines --git-diff-base=\"${usage_base}\" --quiet ./errors/..."
+run = "bin/mutate.sh --git-diff-lines --git-diff-base=\"${usage_base}\" --quiet"
 
 [tasks."mutate:survivors"]
 description = "Write mutago-agentic.json listing the mutants no test killed"
-run = "mutago --coverage --quiet --logger-agentic-json ./errors/..."
+run = "bin/mutate.sh --quiet --no-diffs --logger-agentic-json"
