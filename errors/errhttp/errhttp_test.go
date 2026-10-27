@@ -26,9 +26,13 @@ func TestStatus(t *testing.T) {
 		"exhausted":         {errcode.StatusResourceExhausted, http.StatusTooManyRequests},
 		"aborted":           {errcode.StatusAborted, http.StatusConflict},
 		"out of range":      {errcode.StatusOutOfRange, http.StatusBadRequest},
+		"failed condition":  {errcode.StatusFailedPrecondition, http.StatusBadRequest},
+		"unimplemented":     {errcode.StatusUnimplemented, http.StatusNotImplemented},
+		"outside the set":   {errcode.StatusCode(999), http.StatusInternalServerError},
 		"data loss":         {errcode.StatusDataLoss, http.StatusInternalServerError},
-		// google/rpc/code.proto's HTTP mapping, which grpc-gateway follows.
-		"canceled":          {errcode.StatusCanceled, errhttp.StatusClientClosedRequest},
+		// google/rpc/code.proto's HTTP mapping, which grpc-gateway follows. The number
+		// itself is the contract: nginx's access logs and proxies' metrics key on 499.
+		"canceled":          {errcode.StatusCanceled, 499},
 		"deadline exceeded": {errcode.StatusDeadlineExceeded, http.StatusGatewayTimeout},
 	}
 	for name, tc := range cases {

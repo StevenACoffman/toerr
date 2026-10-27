@@ -58,6 +58,30 @@ func TestErrClass(t *testing.T) {
 	}
 }
 
+func TestClassString(t *testing.T) {
+	cases := map[errclass.Class]string{
+		errclass.Nil:        "nil",
+		errclass.Unknown:    "unknown",
+		errclass.Transient:  "transient",
+		errclass.Persistent: "persistent",
+		errclass.Panic:      "panic",
+		errclass.Class(5):   "unknown",
+	}
+	for class, want := range cases {
+		if got := class.String(); got != want {
+			t.Errorf("Class(%d).String() = %q, want %q", int(class), got, want)
+		}
+	}
+}
+
+// Classifying nothing is still nothing, so `return errclass.WrapAs(err, c)` is safe
+// on the success path.
+func TestWrapAsNil(t *testing.T) {
+	if err := errclass.WrapAs(nil, errclass.Transient); err != nil {
+		t.Errorf("WrapAs(nil, Transient) = %v, want nil", err)
+	}
+}
+
 func TestErrClassUnknown(t *testing.T) {
 	// errTest doesn't have a class assigned
 	class := errclass.GetClass(errTest)

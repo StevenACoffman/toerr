@@ -56,6 +56,13 @@ func TestSealKeepsTheOperatorView(t *testing.T) {
 		assert(t, strings.Contains(out, want),
 			fmt.Sprintf("%%+v should show %q beneath the seal:\n%s", want, out))
 	}
+
+	// A seal returned as it is formats itself the same way.
+	sealed := errors.Seal(inner)
+	equals(t, inner.Error(), fmt.Sprintf("%v", sealed))
+	out = fmt.Sprintf("%+v", sealed)
+	assert(t, strings.Contains(out, "sealOrigin"),
+		fmt.Sprintf("%%+v of a bare seal should show the trace beneath it:\n%s", out))
 }
 
 func TestSealKeepsJoinedBranches(t *testing.T) {

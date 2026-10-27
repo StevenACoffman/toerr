@@ -67,6 +67,7 @@ func TestWrapPreservesChainAndCollectsAttrs(t *testing.T) {
 	wrapped := errors.Wrap(leaf, slog.String("op", "read"))
 
 	assert(t, errors.Is(wrapped, leaf), "Is(wrapped, leaf) should be true")
+	equals(t, leaf, errors.Unwrap(wrapped))
 
 	// Attrs are collected outermost-first: the wrap's attr precedes the leaf's.
 	attrs := errors.Attrs(wrapped)

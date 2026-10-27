@@ -2,6 +2,7 @@ package errors_test
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -33,6 +34,9 @@ type rawJSON struct{}
 // error is nil, so its Error method panics.
 type silentMarkerError struct{ error }
 
+// emptyMarkerError is a marker whose text is empty.
+type emptyMarkerError struct{}
+
 // nilDerefError's Error dereferences its receiver, so a typed nil of it panics.
 type nilDerefError struct{ msg string }
 
@@ -44,6 +48,8 @@ func (redacted) LogValue() slog.Value { return slog.StringValue("REDACTED") }
 func (rawJSON) MarshalJSON() ([]byte, error) { return []byte(`{"raw":true}`), nil }
 
 func (e *nilDerefError) Error() string { return e.msg }
+
+func (emptyMarkerError) Error() string { return "" }
 
 func (e *batchError) Error() string      { return stderrors.Join(e.errs...).Error() }
 func (e *batchError) Unwrap() []error    { return e.errs }
@@ -102,6 +108,10 @@ func TestLogValueShape(t *testing.T) {
 				`{"chain":[{"msg":"b","at":"logvalue_test.go"}]},` +
 				`{"chain":[{"msg":"c","at":"logvalue_test.go"}]}]}`,
 		},
+		"join of one branch": {
+			errors.Join(errors.New("b")),
+			`{"msg":"b","errors":[{"chain":[{"msg":"b","at":"logvalue_test.go"}]}]}`,
+		},
 		"wrap without a message": {
 			errors.Wrap(errors.New("x"), slog.String("op", "a")),
 			`{"msg":"x","chain":[{"at":"logvalue_test.go","attrs":{"op":"a"}},` +
@@ -148,6 +158,11 @@ func TestLogValueShape(t *testing.T) {
 		"typed marker that says nothing names its type": {
 			errors.Mark(errors.New("x"), &silentMarkerError{}),
 			`{"msg":"x","chain":[{"mark":"*errors_test.silentMarkerError"},` +
+				`{"msg":"x","at":"logvalue_test.go"}]}`,
+		},
+		"marker with empty text names its type": {
+			errors.Mark(errors.New("x"), emptyMarkerError{}),
+			`{"msg":"x","chain":[{"mark":"errors_test.emptyMarkerError"},` +
 				`{"msg":"x","at":"logvalue_test.go"}]}`,
 		},
 		"multi-error with attributes of its own": {
@@ -244,42 +259,51 @@ func TestTraceSurvivesATypedNil(t *testing.T) {
 }
 
 // LogValue encodes each kind of value as slog's JSON handler does, including the text
-// it writes for a value it cannot encode.
+// it writes for a value it cannot encode, and drops or keeps each attribute as slog does.
 func TestLogValueEncodesValuesAsSlogDoes(t *testing.T) {
-	cases := map[string]slog.Attr{
-		"bool":              slog.Bool("v", true),
-		"int":               slog.Int64("v", -7),
-		"uint":              slog.Uint64("v", math.MaxUint64),
-		"float":             slog.Float64("v", 1.5),
-		"NaN":               slog.Float64("v", math.NaN()),
-		"duration":          slog.Duration("v", 1500*time.Millisecond),
-		"time":              slog.Time("v", time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)),
-		"time out of range": slog.Time("v", time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC)),
-		"string":            slog.String("v", "<b> & \"quoted\"\n\u2028"),
-		"group":             slog.Group("v", slog.Int("rows", 2)),
-		"slice":             slog.Any("v", []int{1, 2}),
-		"map":               slog.Any("v", map[string]int{"b": 1, "a": 2}),
-		"error":             slog.Any("v", stderrors.New("boom")),
-		"self-encoding":     slog.Any("v", rawJSON{}),
-		"unencodable":       slog.Any("v", make(chan int)),
+	cases := map[string][]slog.Attr{
+		"bool":                {slog.Bool("v", true)},
+		"int":                 {slog.Int64("v", -1234567)},
+		"uint":                {slog.Uint64("v", math.MaxUint64)},
+		"float":               {slog.Float64("v", 1.5)},
+		"NaN":                 {slog.Float64("v", math.NaN())},
+		"duration":            {slog.Duration("v", 1500*time.Millisecond)},
+		"time":                {slog.Time("v", time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC))},
+		"time in year 0":      {slog.Time("v", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC))},
+		"time in year 9999":   {slog.Time("v", time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC))},
+		"time in year 10000":  {slog.Time("v", time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC))},
+		"time in year -1":     {slog.Time("v", time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC))},
+		"string":              {slog.String("v", "<b> & \"quoted\"\n\u2028")},
+		"group":               {slog.Group("v", slog.Int("rows", 2))},
+		"slice":               {slog.Any("v", []int{1, 2})},
+		"map":                 {slog.Any("v", map[string]int{"b": 1, "a": 2})},
+		"HTML in an encoding": {slog.Any("v", map[string]string{"h": "<a> & <b>"})},
+		"nil":                 {slog.Any("v", nil)},
+		"error":               {slog.Any("v", stderrors.New("boom"))},
+		"self-encoding":       {slog.Any("v", rawJSON{})},
+		"unencodable":         {slog.Any("v", make(chan int))},
+		"the zero attr":       {slog.Attr{}, slog.Int("v", 1)},
+		"an empty key":        {slog.Any("", map[string]int{"x": 1}), slog.Int("v", 1)},
+		"an empty group":      {slog.Group("g"), slog.Int("v", 1)},
 	}
-	for name, a := range cases {
+	for name, attrs := range cases {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 			slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
 				ReplaceAttr: func(groups []string, b slog.Attr) slog.Attr {
-					if len(groups) == 0 && b.Key != "v" {
+					if len(groups) == 0 &&
+						(b.Key == slog.TimeKey || b.Key == slog.LevelKey || b.Key == slog.MessageKey) {
 						return slog.Attr{}
 					}
 					return b
 				},
-			})).LogAttrs(t.Context(), slog.LevelInfo, "", a)
+			})).LogAttrs(t.Context(), slog.LevelInfo, "", attrs...)
 			want := strings.TrimSuffix(buf.String(), "\n")
 
-			got := logJSON(t, errors.New("x", a))
-			_, attrs, _ := strings.Cut(got, `"attrs":`)
-			if attrs = strings.TrimSuffix(attrs, "}]}"); attrs != want {
-				t.Errorf("LogValue wrote %s, slog wrote %s", attrs, want)
+			got := logJSON(t, errors.New("x", attrs...))
+			_, gotAttrs, _ := strings.Cut(got, `"attrs":`)
+			if gotAttrs = strings.TrimSuffix(gotAttrs, "}]}"); gotAttrs != want {
+				t.Errorf("LogValue wrote %s, slog wrote %s", gotAttrs, want)
 			}
 		})
 	}
@@ -303,6 +327,22 @@ func TestLogValueOutsideSlog(t *testing.T) {
 				t.Errorf("json.Marshal = %s, %v; want prefix %s", data, marshalErr, tc.wantPrefix)
 			}
 		})
+	}
+}
+
+// fmt and a text handler write the same JSON as a JSON handler.
+func TestLogValueTextIsItsJSON(t *testing.T) {
+	tree := errors.LogValue(errors.New("disk full")).Any()
+	data, marshalErr := tree.(json.Marshaler).MarshalJSON()
+	if marshalErr != nil {
+		t.Fatalf("MarshalJSON: %v", marshalErr)
+	}
+	text, textErr := tree.(encoding.TextMarshaler).MarshalText()
+	if textErr != nil || !bytes.Equal(text, data) {
+		t.Errorf("MarshalText = %s, %v; want %s", text, textErr, data)
+	}
+	if got := fmt.Sprint(tree); got != string(data) {
+		t.Errorf("fmt.Sprint = %s, want %s", got, data)
 	}
 }
 

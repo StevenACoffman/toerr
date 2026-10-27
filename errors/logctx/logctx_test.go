@@ -102,6 +102,31 @@ func TestAttrs(t *testing.T) {
 	}
 }
 
+// Attrs holds only what was recorded, not the empty attrs, unnamed scopes, and empty
+// scopes a handler would hide, so a caller reading the slice sees what a log line shows.
+func TestAttrsHoldOnlyRecordedFields(t *testing.T) {
+	k := slog.Int("k", 1)
+	cases := map[string]func(ctx context.Context){
+		"an empty attr": func(ctx context.Context) { logctx.Add(ctx, slog.Attr{}, k) },
+		"an empty scope name": func(ctx context.Context) {
+			logctx.Add(logctx.Scope(ctx, ""), k)
+		},
+		"an empty scope": func(ctx context.Context) {
+			logctx.Scope(ctx, "a")
+			logctx.Add(ctx, k)
+		},
+	}
+	for name, record := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := logctx.Init(t.Context())
+			record(ctx)
+			if got := logctx.Attrs(ctx); len(got) != 1 || got[0].Key != "k" {
+				t.Errorf("Attrs = %v, want [k=1]", got)
+			}
+		})
+	}
+}
+
 // Code beneath a boundary that collects nothing must still run.
 func TestWithoutInit(t *testing.T) {
 	ctx := t.Context()

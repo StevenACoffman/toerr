@@ -241,13 +241,23 @@ func TestStatusCodeString(t *testing.T) {
 		code errcode.StatusCode
 		want string
 	}{
-		"one word":           {errcode.StatusUnavailable, "unavailable"},
-		"two words":          {errcode.StatusNotFound, "not_found"},
-		"resource exhausted": {errcode.StatusResourceExhausted, "resource_exhausted"},
-		"aborted":            {errcode.StatusAborted, "aborted"},
-		"out of range":       {errcode.StatusOutOfRange, "out_of_range"},
-		"data loss":          {errcode.StatusDataLoss, "data_loss"},
-		"outside the set":    {errcode.StatusCode(999), "unknown"},
+		"unknown":             {errcode.StatusUnknown, "unknown"},
+		"canceled":            {errcode.StatusCanceled, "canceled"},
+		"invalid argument":    {errcode.StatusInvalidArgument, "invalid_argument"},
+		"deadline exceeded":   {errcode.StatusDeadlineExceeded, "deadline_exceeded"},
+		"internal":            {errcode.StatusInternal, "internal"},
+		"not found":           {errcode.StatusNotFound, "not_found"},
+		"unauthenticated":     {errcode.StatusUnauthenticated, "unauthenticated"},
+		"permission denied":   {errcode.StatusPermissionDenied, "permission_denied"},
+		"already exists":      {errcode.StatusAlreadyExists, "already_exists"},
+		"failed precondition": {errcode.StatusFailedPrecondition, "failed_precondition"},
+		"unimplemented":       {errcode.StatusUnimplemented, "unimplemented"},
+		"unavailable":         {errcode.StatusUnavailable, "unavailable"},
+		"resource exhausted":  {errcode.StatusResourceExhausted, "resource_exhausted"},
+		"aborted":             {errcode.StatusAborted, "aborted"},
+		"out of range":        {errcode.StatusOutOfRange, "out_of_range"},
+		"data loss":           {errcode.StatusDataLoss, "data_loss"},
+		"outside the set":     {errcode.StatusCode(999), "unknown"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -301,6 +311,22 @@ func TestACodedErrorContributesItsCallSite(t *testing.T) {
 	}
 }
 
+// The deprecated constructors keep their cause matchable until they are removed.
+func TestWithCodeKeepsItsCause(t *testing.T) {
+	cause := errors.New("disk full")
+	if err := errcode.WithCode(errcode.StatusInternal, "", cause); !errors.Is(err, cause) {
+		t.Errorf("errors.Is(WithCode(..., cause), cause) = false")
+	}
+}
+
+// %q quotes the error's text, as it would a plain error's.
+func TestFormatQuoted(t *testing.T) {
+	err := errcode.Link(errcode.StatusNotFound, "no such seat", errors.New("row 7"))
+	if got, want := fmt.Sprintf("%q", err), fmt.Sprintf("%q", err.Error()); got != want {
+		t.Errorf("%%q = %s, want %s", got, want)
+	}
+}
+
 // ForTransport answers an unclassified context error with its own code, and leaves
 // every attached code, and every sealed cause, as Code reports it.
 func TestForTransport(t *testing.T) {
@@ -329,6 +355,13 @@ func TestForTransport(t *testing.T) {
 		"an unknown code with a message keeps it": {
 			errcode.Link(errcode.StatusUnknown, "gave up", context.Canceled),
 			errcode.StatusCanceled, "gave up",
+		},
+		"an unknown code keeps its message past a deadline": {
+			errcode.Link(errcode.StatusUnknown, "gave up", context.DeadlineExceeded),
+			errcode.StatusDeadlineExceeded, "gave up",
+		},
+		"an unknown code keeps its message": {
+			errcode.New(errcode.StatusUnknown, "gave up"), errcode.StatusUnknown, "gave up",
 		},
 		"no context error": {errors.New("boom"), errcode.StatusUnknown, ""},
 		"nil":              {nil, errcode.StatusUnknown, ""},
