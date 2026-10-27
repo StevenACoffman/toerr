@@ -16,25 +16,26 @@ domain codes (Gap 7) — a documented, intentional divergence, not a defect.
 
 ______________________________________________________________________
 
-## 1. Reconcile the Logging Guidance — High Impact, Medium Effort
+## 1. Reconcile the Logging Guidance — High Impact, Medium Effort — DONE
 
-- [ ] Resolve the contradiction between "log once" (preached in `philosophy.md`)
-      and shipping `slog.LogValuer` on every error, which makes per-layer
+- [x] Resolve the contradiction between "log once" (preached in `philosophy.md`)
+      and shipping `slog.LogValuer` on every error, which made per-layer
       `logger.Error("…", "err", err)` frictionless — the stacked-logline
-      anti-pattern (Gap 4).
+      anti-pattern (Gap 4). Done as the incentive half: errors no longer implement
+      `slog.LogValuer` (1A), and README's "Log once, not per layer" and
+      philosophy's "Handle an error once" name the boundary as the one place to log.
 - [x] Address the absence of a `context`-based field collector that also captures
       **success-path** fields (cache hit/miss, durations) an error can never carry
       (Gap 3). Done: `errors/logctx` (`Init`, `Add`, `Scope`, `Attrs`), built per
       `CONTEXT_COLLECTOR_SPEC.md` (§11 records the decisions), and named in
-      `philosophy.md`'s per-request advice.
-- Options: add a `ctx` field-collector helper (`AddLogField(ctx, …)` style),
-  and/or scope `LogValuer` to "log at the boundary only" with an explicit
-  warning against per-layer logging.
-- Still open: the enforcement half of Gap 4, a lint that reports a logger call
-  outside the boundary. `logctx` removes the reason for one, since a lower layer can
-  record a field without logging.
-- Source: Counterarguments 3; Gaps 3-4; analysis next step #3 (the top-ranked
-  remaining actionable item).
+      `philosophy.md`'s per-request advice. A lower layer now has no reason to log.
+- [x] The enforcement half of Gap 4: report a logger call outside the boundary. Done
+      without a new analyzer: README's "Linting an Adopting Project" configures
+      `forbidigo` with `analyze-types` to report every `log/slog` call outside the
+      boundary packages, and says what it misses (interfaces, wrappers, other
+      loggers, goroutines). Tested on a scratch module against package functions,
+      `*Logger` methods, and a logger from `With`.
+- Source: Counterarguments 3; Gaps 3-4; analysis next step #3.
 
 ### 1A. Scope `slog.LogValuer` to Boundary-Only (The Incentive Half of Gap 4) — DONE
 
@@ -46,8 +47,8 @@ ______________________________________________________________________
       `errors.Attrs(err)` remains the flat-merge option.
 - [x] Add a doc warning (philosophy.md / README) that rich structured error logging is a
       deliberate boundary act via `errors.Attrs` / `errors.LogValue`, not a per-layer habit.
-- Note: this is the *incentive* half of Gap 4. The *enforcement* half — a lint that flags
-  error-to-logger calls outside boundary packages — remains open under item 1.
+- Note: this is the *incentive* half of Gap 4. The *enforcement* half, a lint that
+  reports a logger call outside the boundary, is done under item 1.
 
 ## 2. Document "When Not to Use This" + Wrap-Density Guidance — Medium Impact, Low Effort — DONE
 

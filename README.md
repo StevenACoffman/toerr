@@ -547,6 +547,29 @@ Leave `.Seal(` out. A seal records no frame, so a bare `return errors.Seal(err)`
 hop with no location, which is what `wrapcheck` should report; wrap it with `Link`,
 `Mark`, or `Wrap`.
 
+To log once, `forbidigo` reports a `log/slog` call outside your boundary packages,
+whether a package function or a `*slog.Logger` method:
+
+```yaml
+linters:
+  enable: [forbidigo]
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^(slog\.|\*?slog\.Logger\.)(Debug|Info|Warn|Error|Log)(Context|Attrs)?$
+          pkg: ^log/slog$
+          msg: log at the boundary; record a field with logctx.Add and return the error
+  exclusions:
+    rules:
+      - path: ^(cmd|internal/server)/ # your boundary packages
+        linters: [forbidigo]
+```
+
+It does not see a call through an interface or your own logging wrapper (add a
+pattern for its package), or another logger such as zap. A goroutine or background
+job is a boundary of its own: add its path, or a `//nolint:forbidigo` with the reason.
+
 ## Subpackages
 
 | Package    | Purpose                                                                                                |
