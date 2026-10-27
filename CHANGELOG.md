@@ -30,6 +30,15 @@ release notes when you tag it.
   return trace at its caller's line, and `%+v` of a coded leaf no longer prints
   `<nil>`. The capture costs what a `Wrap` costs: about 133 ns, where `WithCode` cost
   12 ns.
+- **`errors.LogValue` returns the error's tree as JSON.** It returned a group of the
+  message and every attribute, which repeated a key that two errors both set, such as
+  siblings in a join; a backend that decodes into a map kept one value. It now returns
+  a value that JSON handlers write as an object: each error in a chain is a layer with
+  its own message, call site (`at`), attributes, and any code, class, mark, or seal,
+  and each branch of a join is a tree of its own. The value's kind is `Any`, not
+  `Group`, so code that read it with `Value.Group` or matched the group in
+  `ReplaceAttr` must read the JSON instead. `errors.Attrs` still returns the flat
+  list, and a nil error now gives the zero `Value` rather than a panic.
 - **`errcode.Message` returns the outermost non-empty message.** A coded wrap without
   a message only reclassifies, so it no longer hides the message beneath it. `Code`
   returns the same message.

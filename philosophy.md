@@ -697,14 +697,20 @@ one declared outside this package, contributes its fields by implementing
 `Attrs() []slog.Attr`. Fields it already holds then reach the log without being
 copied into a `Wrap`.
 
-Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight
-to a logger does not silently expand its fields at every layer (which invites
-duplicate log lines). When you want the error as a single grouped attribute, ask for
-it explicitly with `errors.LogValue`:
+The flat list repeats any key two errors both set, such as siblings in a join. A
+log backend that decodes JSON into a map, as Google Cloud Logging does, then keeps one
+value and drops the rest without a word. Errors deliberately do **not** implement
+`slog.LogValuer`, so passing one straight to a logger does not silently expand its
+fields at every layer (which invites duplicate log lines). When you want the error
+with its shape, ask for it explicitly with `errors.LogValue`:
 
 ```go
-logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("error", errors.LogValue(err)))
 ```
+
+It writes the error as a JSON object: each error in a chain is a layer with its own
+message, call site, and attributes, and each branch of a join is a tree of its own.
+No key is ever written twice, because no two errors share an object.
 
 Either way the message stays a clean one-liner; the structured fields stay queryable
 in your log backend.
@@ -720,7 +726,7 @@ An error carries what a failure knew, but a request that succeeds has no error. 
 such as a cache hit, a row count, or the user turn up deep in the handler on either
 path. The `logctx` package keeps them on the request's context. Install a collector
 where the request starts, add each field where the code learns it, and write one
-line when the request ends, merging in the error's own attributes if it failed:
+line when the request ends, with the error beside the fields if it failed:
 
 ```go
 ctx = logctx.Init(ctx)
@@ -729,7 +735,7 @@ err := next(ctx)
 level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
 if err != nil {
 	level, msg = slog.LevelError, err.Error()
-	attrs = append(attrs, errors.Attrs(err)...)
+	attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
 }
 logger.LogAttrs(ctx, level, msg, attrs...)
 ```

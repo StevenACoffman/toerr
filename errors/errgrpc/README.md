@@ -46,7 +46,8 @@ becomes `Unknown`, unless it was translated with `FromCode` on the way in.
 func (s *server) ReserveSeat(ctx context.Context, req *pb.ReserveSeatRequest) (*pb.Seat, error) {
 	seat, err := s.store.ReserveSeat(ctx, req.GetId())
 	if err != nil {
-		s.logger.LogAttrs(ctx, slog.LevelError, err.Error(), errors.Attrs(err)...)
+		s.logger.LogAttrs(ctx, slog.LevelError, "reserve seat failed",
+			slog.Any("error", errors.LogValue(err)))
 		return nil, errgrpc.Error(err)
 	}
 	return seat, nil

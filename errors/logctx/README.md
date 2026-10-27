@@ -36,7 +36,7 @@ func logRequests(logger *slog.Logger, next func(context.Context) error) func(con
 		level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
 		if err != nil {
 			level, msg = slog.LevelError, err.Error()
-			attrs = append(attrs, errors.Attrs(err)...)
+			attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
 		}
 		logger.LogAttrs(ctx, level, msg, attrs...)
 	}

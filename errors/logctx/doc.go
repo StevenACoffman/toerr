@@ -10,7 +10,7 @@
 //	logctx.Add(ctx, slog.Bool("cache_hit", true)) // anywhere beneath it
 //	attrs := logctx.Attrs(ctx)    // in the middleware, after the handler returns
 //	if err != nil {
-//		attrs = append(attrs, errors.Attrs(err)...)
+//		attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
 //	}
 //	logger.LogAttrs(ctx, level, msg, attrs...)
 //
@@ -21,6 +21,6 @@
 // return its fields to the goroutine that started it, which adds them under its own
 // scope; that shares nothing between goroutines at all.
 //
-// The package imports nothing from toerr. The merge with errors.Attrs happens at the
-// call site, so the collector also works for code that does not use toerr's errors.
+// The package imports nothing from toerr. The error joins the fields at the call
+// site, so the collector also works for code that does not use toerr's errors.
 package logctx

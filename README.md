@@ -139,13 +139,42 @@ type declared outside this package contributes its own fields by implementing
 `Attrs() []slog.Attr`, the method counterpart of the function, as `Unwrap` is to
 `errors.Unwrap`. That way the fields are not copied into a `Wrap`.
 
-Errors deliberately do **not** implement `slog.LogValuer`, so passing one straight to
-a logger does not auto-expand its fields at every layer. Ask for the grouped form
-explicitly with `errors.LogValue`:
+The flat list repeats a key that two errors both set, such as two siblings in a join.
+To log the error with its shape, ask for it explicitly with
+[`LogValue`](https://pkg.go.dev/github.com/StevenACoffman/toerr/errors#LogValue):
 
 ```go
-logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("err", errors.LogValue(err)))
+logger.LogAttrs(ctx, slog.LevelError, "request failed", slog.Any("error", errors.LogValue(err)))
 ```
+
+A JSON handler then writes the error as an object. Each error in a chain is a layer
+with its own message, call site, and attributes, and each branch of a join is a tree
+of its own, so two errors' `op` never meet in one object:
+
+```json
+"error": {
+  "msg": "a failed: b failed\nc failed: d failed",
+  "chain": [{"msg": "a failed", "at": "/src/svc.go:40", "attrs": {"op": "a"}}],
+  "errors": [
+    {"chain": [{"msg": "b failed", "at": "/src/db.go:12", "attrs": {"op": "b"}}]},
+    {"chain": [{"msg": "c failed", "at": "/src/cache.go:20", "attrs": {"op": "c"}},
+               {"msg": "d failed", "at": "/src/cache.go:31", "attrs": {"op": "d"}}]}
+  ]
+}
+```
+
+A layer also shows an `errcode` code, an `errclass` class, a `Mark`, and a `Seal`,
+whose hidden cause it still describes. Attribute values are resolved first, so a
+`slog.LogValuer` that redacts a secret still redacts it.
+
+Errors deliberately do **not** implement `slog.LogValuer` themselves, so passing one
+straight to a logger does not expand it at every layer.
+
+Google's Go client for Cloud Logging decodes a JSON payload into a map, so a repeated
+key keeps one value; `LogValue`'s object repeats none. When those logs are exported to BigQuery, note
+that a column nests at most 13 levels (each join inside a join adds two), that
+numbers become floats (log an ID above 2^53 as a string), and that an attribute key
+must keep one type across call sites.
 
 The reasoning behind carrying `slog.Attr` on the error is in
 [Design → Context as `slog.Attr`](#context-as-slogattr).
@@ -157,7 +186,7 @@ a request that succeeds has no error to carry them. The
 [`logctx`](errors/logctx/) package keeps them on the request's context.
 `logctx.Init` installs a collector where the request starts, `logctx.Add` records a
 field from any layer, and `logctx.Attrs` returns them all for the request's one log
-line, beside `errors.Attrs(err)` when it failed:
+line, beside the error when it failed:
 
 ```go
 ctx = logctx.Init(ctx)
@@ -166,7 +195,7 @@ err := next(ctx)
 level, msg, attrs := slog.LevelInfo, "request served", logctx.Attrs(ctx)
 if err != nil {
 	level, msg = slog.LevelError, err.Error()
-	attrs = append(attrs, errors.Attrs(err)...)
+	attrs = append(attrs, slog.Any("error", errors.LogValue(err)))
 }
 logger.LogAttrs(ctx, level, msg, attrs...)
 ```
@@ -445,7 +474,7 @@ worth knowing before you adopt it.
   adds information.
 - **Log once, not per layer.** Errors do not implement `slog.LogValuer`, so they do
   not auto-expand when logged. Log the error once, at a single top-level handler,
-  with `errors.Attrs` / `errors.LogValue`. Lower layers wrap (for location) and
+  with `errors.LogValue`. Lower layers wrap (for location) and
   return, not log. A field a lower layer wants in that line goes to `logctx.Add`,
   which is how a canonical log line gets built without a log call per layer.
 - **Do not leak dependencies at boundaries.** `errcode.Link` keeps the cause
