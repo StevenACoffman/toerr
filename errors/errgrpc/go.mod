@@ -15,7 +15,7 @@ replace github.com/StevenACoffman/toerr => ../..
 
 require (
 	github.com/StevenACoffman/toerr v0.4.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 )
